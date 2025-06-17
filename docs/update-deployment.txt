@@ -1,0 +1,29 @@
+# COMANDOS PARA ATUALIZAR O DEPLOYMENT
+
+# 1. ATUALIZAR O SERVIÇO EXISTENTE (RECOMENDADO):
+gcloud run deploy analise-nf --source . --platform managed --region us-central1 --allow-unauthenticated --memory 4Gi --cpu 4 --timeout 900
+
+# O comando acima irá:
+# - Fazer build de uma nova imagem com o código atualizado
+# - Criar uma nova revisão do serviço
+# - Redirecionar o tráfego automaticamente para a nova versão
+# - Manter a mesma URL
+
+# 2. VERIFICAR O STATUS DO DEPLOYMENT:
+gcloud run services describe analise-nf --region us-central1 --format="value(status.url)"
+
+# 3. VER LOGS DA NOVA REVISÃO:
+gcloud run services logs tail analise-nf --region us-central1
+
+# 4. SE HOUVER PROBLEMAS, REVERTER PARA VERSÃO ANTERIOR:
+# Listar revisões:
+# gcloud run revisions list --service analise-nf --region us-central1
+
+# Redirecionar tráfego para revisão anterior:
+# gcloud run services update-traffic analise-nf --to-revisions=REVISION_NAME=100 --region us-central1
+
+# ALTERNATIVA - USAR O SCRIPT DE DEPLOY:
+# Se você preferir usar o script PowerShell:
+# .\deploy.ps1 -skipGit
+
+# DICA: O Cloud Run mantém as últimas revisões, então você sempre pode voltar se algo der errado! 

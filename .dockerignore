@@ -1,0 +1,80 @@
+# Arquivos Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+*.egg-info/
+dist/
+build/
+
+# Arquivos de IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Documentação
+*.md
+docs/
+README.md
+LICENSE
+
+# Configurações do Streamlit (vamos deixar o container criar as próprias)
+.streamlit/
+
+# Arquivos de configuração local
+.env
+.env.local
+.env.*.local
+.env.example
+config/local/
+
+# Logs
+*.log
+logs/
+
+# Testes
+tests/
+test/
+*_test.py
+test_*.py
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+
+# Docker
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# Cloud Build
+cloudbuild.yaml
+
+# Banco de dados temporário
+*.db
+notas_fiscais.db
+
+# Outros
+.editorconfig
+Makefile 

@@ -1,0 +1,39 @@
+# Este arquivo especifica arquivos que o gcloud ignorará ao fazer upload
+# do código para o Google Cloud Build
+
+.gcloudignore
+.git
+.gitignore
+
+# Arquivos Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# Testes
+tests/
+test/
+*_test.py
+test_*.py
+
+# IDEs
+.vscode/
+.idea/
+
+# Documentação
+docs/
+*.md
+!README.md
+
+# Logs
+*.log
+
+# Arquivos temporários
+*.tmp
+*.temp
+.DS_Store 

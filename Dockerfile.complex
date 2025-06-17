@@ -1,0 +1,56 @@
+# Use a imagem oficial do Python como base
+FROM python:3.11-slim
+
+# Define o diretório de trabalho no container
+WORKDIR /app
+
+# Instala dependências do sistema necessárias
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    curl \
+    software-properties-common \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copia o arquivo de requisitos primeiro (para aproveitar o cache do Docker)
+COPY requirements.txt .
+
+# Instala as dependências Python com timeout maior
+RUN pip install --no-cache-dir --timeout=120 -r requirements.txt
+
+# Copia o código da aplicação
+COPY . .
+
+# Cria um usuário não-root para executar a aplicação (segurança)
+RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+
+# Muda para o usuário appuser
+USER appuser
+
+# Cria diretório e arquivo de configuração do Streamlit para o usuário appuser
+RUN mkdir -p /home/appuser/.streamlit && \
+    echo '\
+[server]\n\
+port = 8080\n\
+enableCORS = false\n\
+enableXsrfProtection = true\n\
+headless = true\n\
+\n\
+[browser]\n\
+gatherUsageStats = false\n\
+' > /home/appuser/.streamlit/config.toml
+
+# Expõe a porta que o Cloud Run espera (8080 por padrão)
+EXPOSE 8080
+
+# Define variáveis de ambiente
+ENV PYTHONUNBUFFERED=1
+ENV STREAMLIT_SERVER_PORT=8080
+ENV STREAMLIT_SERVER_ADDRESS=0.0.0.0
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=30s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8080/_stcore/health || exit 1
+
+# Comando para executar a aplicação Streamlit
+CMD ["streamlit", "run", "app.py", "--server.port=8080", "--server.address=0.0.0.0"] 
