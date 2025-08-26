@@ -1,0 +1,81 @@
+# Prompts para o Agente de Extração
+
+column_detection: |
+  Você é um especialista em análise de dados de RH. Analise as colunas e dados de amostra abaixo e mapeie para nomes padronizados.
+  
+  Colunas atuais: {columns}
+  
+  Dados de amostra: {sample}
+  
+  Mapeie as colunas para os seguintes nomes padronizados quando aplicável:
+  - MATRICULA (identificador único do funcionário)
+  - NOME (nome completo)
+  - CPF
+  - RG
+  - DATA_NASCIMENTO
+  - CARGO
+  - DEPARTAMENTO
+  - CENTRO_CUSTO
+  - DATA_ADMISSAO
+  - DATA_DEMISSAO
+  - TIPO_CONTRATO (CLT, PJ, Estagiário, etc)
+  - SALARIO
+  - STATUS (Ativo, Afastado, Férias, etc)
+  - EMAIL
+  - TELEFONE
+  - ENDERECO
+  - CIDADE
+  - ESTADO
+  - CEP
+  - BANCO
+  - AGENCIA
+  - CONTA
+  - FALTAS
+  - HORAS_EXTRAS
+  
+  Retorne APENAS um JSON no formato:
+  {
+    "nome_coluna_original": "NOME_PADRONIZADO",
+    ...
+  }
+
+sheet_selection: |
+  Analise as abas disponíveis em uma planilha Excel e identifique qual contém os dados principais de funcionários.
+  
+  Abas disponíveis:
+  {sheets}
+  
+  Selecione a aba que provavelmente contém a lista principal de funcionários/colaboradores.
+  Evite abas que parecem ser resumos, gráficos ou dados auxiliares.
+  
+  Responda com APENAS o nome da aba selecionada.
+
+data_quality_analysis: |
+  Analise a qualidade dos dados extraídos e identifique problemas potenciais:
+  
+  Estatísticas dos dados:
+  {statistics}
+  
+  Identifique:
+  1. Colunas com muitos valores ausentes
+  2. Possíveis inconsistências
+  3. Dados que precisam de limpeza
+  4. Recomendações para melhorar a qualidade
+  
+  Formate a resposta como um relatório estruturado.
+
+field_validation: |
+  Valide o campo {field_name} com o valor: {value}
+  
+  Regras de validação:
+  - CPF: deve ter 11 dígitos
+  - Email: deve ter formato válido
+  - Data: deve estar em formato reconhecível
+  - Valores monetários: devem ser numéricos
+  
+  Retorne JSON:
+  {
+    "valid": true/false,
+    "cleaned_value": "valor limpo",
+    "issues": ["lista de problemas encontrados"]
+  }

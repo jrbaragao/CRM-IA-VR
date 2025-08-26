@@ -1,0 +1,45 @@
+# Core dependencies
+streamlit==1.29.0
+pandas==2.1.4
+numpy==1.26.2
+python-dotenv==1.0.0
+
+# LlamaIndex and AI
+llama-index==0.9.48
+llama-index-embeddings-openai==0.1.5
+llama-index-llms-openai==0.1.5
+llama-index-vector-stores-chroma==0.1.4
+chromadb==0.4.22
+openai==1.57.2
+langchain==0.1.0
+
+# Database
+sqlalchemy==2.0.25
+psycopg2-binary==2.9.9
+alembic==1.13.1
+
+# Data processing
+openpyxl==3.1.2  # Para ler Excel
+xlsxwriter==3.1.9  # Para escrever Excel
+pydantic==2.5.3
+pydantic-settings==2.1.0
+
+# Visualization
+plotly==5.18.0
+matplotlib==3.8.2
+seaborn==0.13.0
+
+# PDF generation
+reportlab==4.0.8
+weasyprint==60.2
+
+# Testing
+pytest==7.4.4
+pytest-cov==4.1.0
+pytest-asyncio==0.23.3
+
+# Development
+black==23.12.1
+flake8==7.0.0
+mypy==1.8.0
+pre-commit==3.6.0

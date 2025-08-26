@@ -1,0 +1,89 @@
+# Prompts para o Agente de Cálculo
+
+eligibility_check: |
+  Analise os dados do funcionário e determine se ele é elegível para receber vale refeição.
+  
+  Dados do funcionário:
+  {funcionario}
+  
+  Regras gerais:
+  - Funcionários CLT são elegíveis
+  - Estagiários podem ser elegíveis dependendo da política da empresa
+  - Funcionários afastados por licença médica mantêm o benefício por até 15 dias
+  - Funcionários em férias mantêm o benefício
+  - Terceirizados geralmente não são elegíveis
+  
+  Retorne JSON:
+  {
+    "elegivel": true/false,
+    "motivo": "explicação da decisão",
+    "recomendacao": "sugestão se houver caso especial"
+  }
+
+calculation_review: |
+  Revise os cálculos de vale refeição abaixo e identifique possíveis anomalias:
+  
+  Resumo dos cálculos:
+  {summary}
+  
+  Valores atípicos:
+  {outliers}
+  
+  Analise:
+  1. Os valores estão dentro do esperado?
+  2. Há funcionários com valores muito discrepantes?
+  3. O total geral faz sentido para uma empresa deste porte?
+  4. Existem possíveis erros de cálculo?
+  
+  Forneça uma análise detalhada e recomendações.
+
+generate_report: |
+  Gere um relatório executivo sobre o cálculo de vale refeição com base nos dados:
+  
+  Dados processados:
+  {data}
+  
+  Resumo:
+  {summary}
+  
+  O relatório deve incluir:
+  1. Resumo executivo
+  2. Totais e médias
+  3. Distribuição por departamento
+  4. Alertas e observações importantes
+  5. Recomendações para otimização
+  
+  Use linguagem profissional e clara, formatada para apresentação à diretoria.
+
+policy_interpretation: |
+  Interprete a seguinte política de vale refeição e extraia as regras de cálculo:
+  
+  Política:
+  {policy_text}
+  
+  Extraia e estruture:
+  1. Valor por dia
+  2. Percentual de desconto do funcionário
+  3. Categorias elegíveis
+  4. Exceções e casos especiais
+  5. Regras para faltas e afastamentos
+  
+  Retorne as regras em formato estruturado JSON.
+
+anomaly_detection: |
+  Detecte anomalias nos cálculos de vale refeição:
+  
+  Estatísticas:
+  - Média: {mean}
+  - Desvio padrão: {std}
+  - Mínimo: {min}
+  - Máximo: {max}
+  
+  Funcionários com valores extremos:
+  {extremes}
+  
+  Identifique:
+  1. Valores que parecem incorretos
+  2. Padrões suspeitos
+  3. Possíveis erros de entrada de dados
+  4. Recomendações para correção
