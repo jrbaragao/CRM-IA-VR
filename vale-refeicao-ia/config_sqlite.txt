@@ -1,0 +1,33 @@
+# ===================================
+# CONFIGURAÇÕES DO VALE REFEIÇÃO IA - MODO SQLITE
+# ===================================
+
+# Banco de Dados - Usando SQLite para testes/curso
+DATABASE_URL=sqlite:///./vale_refeicao.db
+
+# OpenAI API - OBRIGATÓRIO!
+# Obtenha sua chave em: https://platform.openai.com/api-keys
+OPENAI_API_KEY=sk-...  # SUBSTITUA pela sua chave real
+
+# ChromaDB (Vector Store) - Modo local/memória para testes
+CHROMA_HOST=localhost
+CHROMA_PORT=8000
+CHROMA_PERSIST=False  # False = apenas em memória para testes
+CHROMA_COLLECTION=vale_refeicao_collection
+
+# Configurações de Vale Refeição
+VALOR_DIA_UTIL=35.00
+DESCONTO_FUNCIONARIO_PCT=0.20
+DIAS_UTEIS_MES=22
+
+# Ambiente
+ENVIRONMENT=development
+DEBUG=True
+
+# Configurações de Upload
+MAX_FILE_SIZE_MB=50
+ALLOWED_EXTENSIONS=csv,xlsx,xls
+
+# Logs
+LOG_LEVEL=INFO
+LOG_FILE=logs/app.log

@@ -8,7 +8,7 @@ import numpy as np
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime, date
 from dateutil.relativedelta import relativedelta
-from llama_index import Document
+from llama_index.core import Document
 import json
 import calendar
 

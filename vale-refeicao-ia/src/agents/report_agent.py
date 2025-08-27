@@ -7,7 +7,7 @@ import pandas as pd
 import numpy as np
 from typing import Dict, List, Any, Optional
 from datetime import datetime
-from llama_index import Document
+from llama_index.core import Document
 import json
 import matplotlib.pyplot as plt
 import seaborn as sns

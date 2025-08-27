@@ -1,0 +1,11 @@
+MATRICULA,NOME,CPF,DEPARTAMENTO,DATA_ADMISSAO,SALARIO,CARGO,DIAS_TRABALHADOS,FALTAS
+1001,João Carlos Silva,123.456.789-00,Tecnologia da Informação,2023-01-15,5000.00,Analista de Sistemas,22,0
+1002,Maria Aparecida Santos,987.654.321-00,Recursos Humanos,2022-06-20,4500.00,Analista de RH,20,2
+1003,Pedro Henrique Oliveira,456.789.123-00,Vendas,2023-03-10,3800.00,Vendedor Senior,22,0
+1004,Ana Paula Costa,321.654.987-00,Marketing,2022-09-05,4200.00,Coordenadora de Marketing,21,1
+1005,Carlos Eduardo Souza,789.123.456-00,Financeiro,2023-02-01,5500.00,Analista Financeiro,22,0
+1006,Juliana Ferreira Lima,654.321.789-00,Tecnologia da Informação,2021-11-15,6200.00,Desenvolvedora Senior,22,0
+1007,Roberto Carlos Mendes,147.258.369-00,Operações,2023-04-03,3500.00,Assistente Operacional,19,3
+1008,Patrícia Souza Alves,258.369.147-00,Vendas,2022-08-12,4100.00,Vendedora,22,0
+1009,Fernando Augusto Dias,369.147.258-00,Logística,2023-01-20,3900.00,Analista de Logística,22,0
+1010,Luciana Cristina Rocha,963.852.741-00,Recursos Humanos,2021-05-10,5800.00,Gerente de RH,22,0

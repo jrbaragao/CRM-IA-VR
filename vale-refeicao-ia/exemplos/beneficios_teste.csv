@@ -1,0 +1,11 @@
+MATRICULA,VALE_TRANSPORTE,PLANO_SAUDE,VALE_ALIMENTACAO,OBSERVACOES
+1001,SIM,SIM,SIM,Funcionário exemplar
+1002,NAO,SIM,SIM,Mora próximo ao trabalho
+1003,SIM,SIM,SIM,
+1004,SIM,SIM,SIM,Promovida recentemente
+1005,NAO,SIM,SIM,Trabalho remoto parcial
+1006,SIM,SIM,SIM,Team lead
+1007,SIM,NAO,SIM,Período de experiência
+1008,SIM,SIM,SIM,
+1009,SIM,SIM,SIM,Novo contratado
+1010,NAO,SIM,SIM,Cargo de gestão

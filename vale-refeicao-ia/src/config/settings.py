@@ -34,8 +34,8 @@ class Settings(BaseSettings):
     
     # Configurações de upload
     max_file_size_mb: int = Field(default=50, env="MAX_FILE_SIZE_MB")
-    allowed_extensions: list[str] = Field(
-        default=[".csv", ".xlsx", ".xls"],
+    allowed_extensions: str = Field(
+        default="csv,xlsx,xls",
         env="ALLOWED_EXTENSIONS"
     )
     
@@ -69,6 +69,13 @@ class Settings(BaseSettings):
     def max_file_size_bytes(self) -> int:
         """Retorna o tamanho máximo do arquivo em bytes"""
         return self.max_file_size_mb * 1024 * 1024
+    
+    @property
+    def allowed_extensions_list(self) -> list[str]:
+        """Retorna lista de extensões permitidas"""
+        # Adiciona ponto se não tiver
+        exts = self.allowed_extensions.split(',')
+        return [f".{ext.strip()}" if not ext.strip().startswith('.') else ext.strip() for ext in exts]
     
     @property
     def database_ready(self) -> bool:

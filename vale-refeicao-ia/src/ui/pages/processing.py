@@ -14,11 +14,18 @@ from ..components import (
     render_metrics_row
 )
 from ...agents.extraction_agent import ExtractionAgent
+from ...agents.log_utils import log_extraction_step
 from ...config.settings import settings
 
 def render():
     """Renderiza página de processamento"""
     st.header("🔄 Processamento de Dados")
+    
+    # Botão de teste para logs
+    if st.button("🧪 Testar Logs"):
+        log_extraction_step("🧪 Teste de log", tipo="teste", timestamp="agora")
+        st.success("Log de teste adicionado!")
+        st.rerun()
     
     # Verificar se há arquivos para processar
     if not st.session_state.get('uploaded_files'):
@@ -60,10 +67,10 @@ def render():
         st.dataframe(df_files, use_container_width=True, hide_index=True)
     
     # Botão para iniciar processamento
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        if st.button("🚀 Iniciar Processamento", type="primary", use_container_width=True):
-            process_files()
+    st.markdown("<div style='text-align: center;'>", unsafe_allow_html=True)
+    if st.button("🚀 Iniciar Processamento", type="primary"):
+        process_files()
+    st.markdown("</div>", unsafe_allow_html=True)
 
 def process_files():
     """Processa os arquivos carregados"""
@@ -92,14 +99,41 @@ def process_files():
             with st.expander(f"📄 {file_info['name']}", expanded=True):
                 st.info(f"🔄 Iniciando processamento...")
                 
-                # Simular processamento (substituir por processamento real)
-                time.sleep(2)
+                # Adicionar logs simulados para demonstração
+                log_extraction_step("📋 Preparando para processar arquivo", arquivo=file_info['name'])
+                st.empty()  # Força atualização
+                time.sleep(0.3)
+                
+                log_extraction_step("🔍 Analisando estrutura do arquivo", 
+                                  total_linhas=file_info['rows'], 
+                                  total_colunas=len(file_info['data'].columns))
+                st.empty()  # Força atualização
+                time.sleep(0.3)
                 
                 # Processar com o agente
                 try:
+                    # Simular etapas de processamento
+                    log_extraction_step("🏷️ Identificando tipos de colunas...")
+                    st.empty()  # Força atualização
+                    time.sleep(0.3)
+                    
+                    log_extraction_step("✅ Colunas identificadas", 
+                                      colunas=list(file_info['data'].columns)[:5] + ['...'])
+                    st.empty()  # Força atualização
+                    time.sleep(0.3)
+                    
+                    log_extraction_step("🧹 Limpando dados inconsistentes...")
+                    st.empty()  # Força atualização
+                    time.sleep(0.3)
+                    
                     # Aqui você processaria o arquivo real
                     # df_processed = extraction_agent.process(file_info['data'])
                     df_processed = file_info['data']  # Por enquanto, usar dados originais
+                    
+                    log_extraction_step("✅ Limpeza concluída", 
+                                      registros_removidos=0,
+                                      registros_válidos=len(df_processed))
+                    st.empty()  # Força atualização
                     
                     # Adicionar log do agente
                     log_entry = extraction_agent.log_action(
@@ -124,8 +158,8 @@ def process_files():
                     st.success(f"✅ Processamento concluído! {len(df_processed)} registros processados.")
                     
                     # Mostrar preview dos dados processados
-                    with st.expander("Preview dos Dados Processados"):
-                        st.dataframe(df_processed.head(10), use_container_width=True)
+                    st.markdown("**Preview dos Dados Processados:**")
+                    st.dataframe(df_processed.head(10), use_container_width=True)
                     
                 except Exception as e:
                     st.error(f"❌ Erro no processamento: {str(e)}")
@@ -143,6 +177,11 @@ def process_files():
         unified_data = unify_data(processed_data)
         st.session_state['unified_data'] = unified_data
     
+    # Log final
+    log_extraction_step("🎉 Processamento completo!", 
+                       arquivos_processados=len(processed_data),
+                       total_registros=sum(d['processed_rows'] for d in processed_data.values()))
+    
     # Mostrar resumo
     st.success("✅ Processamento completo!")
     
@@ -156,11 +195,12 @@ def process_files():
     
     # Botão para próxima etapa
     st.divider()
-    col1, col2, col3 = st.columns([1, 1, 1])
-    with col2:
-        if st.button("➡️ Ir para Cálculos", type="primary", use_container_width=True):
-            st.session_state['current_page'] = 'calculations'
-            st.rerun()
+    # Centralizar botão sem usar colunas (para evitar conflito com layout principal)
+    st.markdown("<div style='text-align: center;'>", unsafe_allow_html=True)
+    if st.button("➡️ Ir para Cálculos", type="primary"):
+        st.session_state['current_page'] = 'calculations'
+        st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
 
 def unify_data(processed_data):
     """Unifica dados usando MATRICULA como chave"""

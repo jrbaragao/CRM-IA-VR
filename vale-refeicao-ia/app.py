@@ -12,15 +12,15 @@ import sys
 sys.path.append(str(Path(__file__).parent))
 
 from src.config.settings import Settings
-from src.ui.components import render_header, render_sidebar
-from src.ui.pages import upload, processing, calculations, reports
+from src.ui.components import render_header, render_sidebar, render_realtime_logs
+from src.ui.pages import upload, processing, calculations, reports, prompts_manager, agent_monitor
 
 # Configuração da página
 st.set_page_config(
     page_title="💳 Sistema de Vale Refeição IA",
     page_icon="🍽️",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"  # Mudado para collapsed já que temos navegação customizada
 )
 
 # Carregar configurações
@@ -94,18 +94,52 @@ def main():
     if 'agent_logs' not in st.session_state:
         st.session_state.agent_logs = []
     
-    # Sidebar com navegação e configurações
-    page = render_sidebar()
+    # Adicionar logs de exemplo se não houver nenhum (apenas para teste)
+    if len(st.session_state.agent_logs) == 0:
+        from datetime import datetime
+        st.session_state.agent_logs = [
+            {
+                'timestamp': datetime.now().isoformat(),
+                'agent': 'extraction_agent',
+                'action': '🚀 Sistema iniciado',
+                'details': {'status': 'Aguardando arquivos'}
+            }
+        ]
     
-    # Renderizar página selecionada
-    if page == 'upload':
-        upload.render()
-    elif page == 'processing':
-        processing.render()
-    elif page == 'calculations':
-        calculations.render()
-    elif page == 'reports':
-        reports.render()
+    # Verificar se deve usar sidebar padrão ou layout customizado
+    use_custom_layout = st.session_state.get('use_custom_layout', True)
+    
+    if use_custom_layout:
+        # Layout customizado com 3 colunas
+        col_nav, col_main, col_logs = st.columns([1, 2.5, 1])
+        
+        # Coluna da esquerda - Navegação
+        with col_nav:
+            page = render_sidebar()
+    else:
+        # Layout com sidebar padrão (mais espaço para conteúdo)
+        col_main, col_logs = st.columns([3, 1])
+        page = render_sidebar()
+    
+    # Coluna do meio - Conteúdo principal
+    with col_main:
+        # Renderizar página selecionada
+        if page == 'upload':
+            upload.render()
+        elif page == 'processing':
+            processing.render()
+        elif page == 'calculations':
+            calculations.render()
+        elif page == 'reports':
+            reports.render()
+        elif page == 'prompts':
+            prompts_manager.render()
+        elif page == 'monitor':
+            agent_monitor.render()
+    
+    # Coluna da direita - Logs em tempo real
+    with col_logs:
+        render_realtime_logs()
     
     # Footer
     st.markdown("---")

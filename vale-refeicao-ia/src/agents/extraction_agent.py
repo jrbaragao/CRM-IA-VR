@@ -7,13 +7,14 @@ import pandas as pd
 import numpy as np
 from typing import Dict, List, Any, Tuple, Optional
 from pathlib import Path
-from llama_index import Document
+from llama_index.core import Document
 import json
 import re
 from datetime import datetime
 
 from .base_agent import BaseAgent
 from ..config.settings import settings
+from .log_utils import log_extraction_step
 
 class ExtractionAgent(BaseAgent):
     """Agente especializado em extração e limpeza de dados de planilhas"""
@@ -39,23 +40,34 @@ class ExtractionAgent(BaseAgent):
             DataFrame processado
         """
         self.log_action("Iniciando processamento", {"file": str(file_path)})
+        log_extraction_step("🔍 Analisando arquivo", arquivo=file_path.name)
         
         # 1. Carregar arquivo
+        log_extraction_step("📂 Carregando arquivo...")
         df = self._load_file(file_path)
+        log_extraction_step("✅ Arquivo carregado", linhas=len(df), colunas=len(df.columns))
         
         # 2. Detectar e mapear colunas
+        log_extraction_step("🏷️ Detectando tipos de colunas...")
         df = self._detect_and_map_columns(df)
+        log_extraction_step("✅ Colunas mapeadas", colunas=list(df.columns))
         
         # 3. Limpar dados
+        log_extraction_step("🧹 Limpando dados...")
         df = self._clean_data(df)
+        log_extraction_step("✅ Limpeza concluída", registros_válidos=len(df))
         
         # 4. Validar dados
+        log_extraction_step("🔍 Validando integridade...")
         validation_results = self._validate_data(df)
+        log_extraction_step("✅ Validação concluída", erros=validation_results.get('errors', 0))
         
         # 5. Adicionar metadados
+        log_extraction_step("📝 Adicionando metadados...")
         df = self._add_metadata(df, file_path)
         
         # 6. Armazenar regras aprendidas
+        log_extraction_step("💾 Salvando padrões aprendidos...")
         self._store_learning(df, validation_results)
         
         self.log_action("Processamento concluído", {
