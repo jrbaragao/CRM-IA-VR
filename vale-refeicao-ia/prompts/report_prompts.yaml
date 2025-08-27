@@ -1,0 +1,97 @@
+# Prompts para o Agente de Relatórios
+
+generate_insights: |
+  Você é um analista de RH especializado em benefícios. Analise as métricas abaixo e gere insights relevantes.
+  
+  Métricas:
+  {metrics}
+  
+  Resumo dos dados:
+  {data_summary}
+  
+  Gere 3-5 insights acionáveis sobre:
+  1. Eficiência do programa de vale refeição
+  2. Oportunidades de otimização
+  3. Comparação com benchmarks do mercado
+  4. Impacto no orçamento
+  
+  Formate cada insight em uma linha, seja específico e quantitativo quando possível.
+
+generate_recommendations: |
+  Baseado na análise dos dados de vale refeição, forneça recomendações estratégicas.
+  
+  Contexto:
+  {data_summary}
+  
+  Gere recomendações nas seguintes categorias:
+  1. Redução de custos sem impactar benefícios
+  2. Melhoria na satisfação dos funcionários
+  3. Otimização de processos
+  4. Compliance e conformidade
+  
+  Para cada recomendação, inclua:
+  - Ação específica
+  - Justificativa baseada em dados
+  - Impacto esperado
+  - Prioridade (alta/média/baixa)
+
+analyze_anomalies: |
+  Analise os dados abaixo e identifique possíveis anomalias ou padrões incomuns.
+  
+  Dados estatísticos:
+  {statistics}
+  
+  Valores atípicos identificados:
+  {outliers}
+  
+  Identifique:
+  1. Possíveis erros de dados
+  2. Casos que requerem investigação
+  3. Padrões suspeitos
+  4. Recomendações para correção
+  
+  Seja específico e indique a severidade de cada anomalia.
+
+executive_summary: |
+  Crie um resumo executivo conciso sobre o programa de vale refeição.
+  
+  Dados principais:
+  {key_metrics}
+  
+  Período: {period}
+  
+  O resumo deve incluir:
+  1. Visão geral do programa (2-3 linhas)
+  2. Principais indicadores de performance
+  3. Desafios identificados
+  4. Próximos passos recomendados
+  
+  Use linguagem executiva, seja direto e foque em valor para o negócio.
+
+benchmark_analysis: |
+  Compare os dados de vale refeição com benchmarks do mercado.
+  
+  Dados atuais:
+  {current_data}
+  
+  Analise:
+  1. Como os valores se comparam com a média do mercado?
+  2. A taxa de elegibilidade está adequada?
+  3. O percentual de desconto está competitivo?
+  4. Existem oportunidades de melhoria?
+  
+  Forneça comparações quantitativas e qualitativas.
+
+cost_optimization: |
+  Analise oportunidades de otimização de custos no programa de vale refeição.
+  
+  Estrutura de custos atual:
+  {cost_structure}
+  
+  Identifique:
+  1. Áreas com maior potencial de economia
+  2. Estratégias de negociação com fornecedores
+  3. Ajustes de política que podem reduzir custos
+  4. Impacto de cada sugestão na satisfação dos funcionários
+  
+  Priorize sugestões por impacto e facilidade de implementação.

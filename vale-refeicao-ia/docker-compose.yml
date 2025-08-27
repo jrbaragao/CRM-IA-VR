@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  # Banco de dados PostgreSQL
+  postgres:
+    image: postgres:14-alpine
+    container_name: vale_refeicao_db
+    environment:
+      POSTGRES_USER: vr_user
+      POSTGRES_PASSWORD: vr_password_2024
+      POSTGRES_DB: vale_refeicao
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vr_user -d vale_refeicao"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Aplicação Streamlit (opcional - descomente para usar)
+  # app:
+  #   build: .
+  #   container_name: vale_refeicao_app
+  #   ports:
+  #     - "8501:8501"
+  #   environment:
+  #     DATABASE_URL: postgresql://vr_user:vr_password_2024@postgres:5432/vale_refeicao
+  #     OPENAI_API_KEY: ${OPENAI_API_KEY}
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #   volumes:
+  #     - ./uploads:/app/uploads
+  #     - ./exports:/app/exports
+  #     - ./chroma_db:/app/chroma_db
+
+volumes:
+  postgres_data:
+    driver: local
