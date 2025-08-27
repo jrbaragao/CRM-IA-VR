@@ -19,8 +19,10 @@ def render():
     # Obter gerenciador de banco
     db = get_db_manager()
     
-    # Verificar se há tabelas de dados
-    data_tables = [table for table in db.list_tables() if not table.startswith('_')]
+    # Verificar se há tabelas de dados (excluir tabelas do sistema)
+    system_tables = ['importacoes', 'agent_logs', 'calculation_configs']
+    all_tables = db.list_tables()
+    data_tables = [table for table in all_tables if table not in system_tables]
     
     if not data_tables:
         render_alert(
@@ -64,6 +66,7 @@ def render_calculation_config_tab(db, data_tables):
         **🛠️ Ferramentas Selecionáveis:**
         - Escolha quais ferramentas o agente pode usar
         - SQL queries, análises estatísticas, correlações
+        - **📊 Exportação automática para Excel/CSV/JSON**
         - Controle total sobre as capacidades do agente
         
         **🔄 Processo Autônomo:**
@@ -103,14 +106,18 @@ def render_calculation_config_tab(db, data_tables):
         st.markdown("### 🎯 Prompt de Cálculo")
         calculation_prompt = st.text_area(
             "Descreva o que o agente deve calcular:",
-            placeholder="""Exemplo:
-Analise os dados de funcionários e calcule o vale refeição baseado nas seguintes regras:
-1. Funcionários com salário até R$ 3.000: vale de R$ 500
-2. Funcionários com salário entre R$ 3.001 e R$ 6.000: vale de R$ 400  
-3. Funcionários com salário acima de R$ 6.000: vale de R$ 300
-4. Considere apenas funcionários ativos
-5. Aplique desconto proporcional para faltas
-6. Gere relatório detalhado com totais por departamento""",
+            placeholder="""Exemplo (Vale Refeição):
+Atue como um especialista de RH e calculista de vale refeições no Brasil.
+
+A tabela ativos indica a lista geral de colaboradores e se relaciona com as demais pela coluna MATRICULA.
+
+Gere uma planilha com os colaboradores ativos que tenham direito a vale refeição.
+
+Não se paga vale refeição para colaboradores de férias, que são aprendizes, com afastamentos, que estão no exterior ou desligados.
+
+Considere um mês de 22 dias úteis.
+
+Use a ferramenta 'Cálculo de Vale Refeição' para executar a lógica de negócio e depois exporte para Excel.""",
             height=200,
             help="Seja específico sobre regras, condições e formato do resultado desejado"
         )
@@ -121,7 +128,7 @@ Analise os dados de funcionários e calcule o vale refeição baseado nas seguin
         available_tools = get_available_tools()
         selected_tools = []
         
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         
         with col1:
             st.markdown("**🔍 Análise de Dados:**")
@@ -132,6 +139,12 @@ Analise os dados de funcionários e calcule o vale refeição baseado nas seguin
         with col2:
             st.markdown("**🧮 Cálculos:**")
             for tool in available_tools['calculations']:
+                if st.checkbox(f"{tool['icon']} {tool['name']}", key=f"tool_{tool['id']}"):
+                    selected_tools.append(tool['id'])
+        
+        with col3:
+            st.markdown("**📊 Exportação:**")
+            for tool in available_tools['export_tools']:
                 if st.checkbox(f"{tool['icon']} {tool['name']}", key=f"tool_{tool['id']}"):
                     selected_tools.append(tool['id'])
         
@@ -256,10 +269,16 @@ def get_available_tools():
             {'id': 'data_quality', 'name': 'Qualidade dos Dados', 'icon': '✅'}
         ],
         'calculations': [
+            {'id': 'calculo_vale_refeicao', 'name': '🍽️ Cálculo de Vale Refeição', 'icon': '💰'},
             {'id': 'mathematical_operations', 'name': 'Operações Matemáticas', 'icon': '🧮'},
             {'id': 'conditional_logic', 'name': 'Lógica Condicional', 'icon': '🔀'},
             {'id': 'aggregations', 'name': 'Agregações', 'icon': '📈'},
             {'id': 'report_generation', 'name': 'Relatórios', 'icon': '📄'}
+        ],
+        'export_tools': [
+            {'id': 'excel_export', 'name': 'Exportar para Excel', 'icon': '📊'},
+            {'id': 'csv_export', 'name': 'Exportar para CSV', 'icon': '📄'},
+            {'id': 'json_export', 'name': 'Exportar para JSON', 'icon': '🔗'}
         ]
     }
 
@@ -267,10 +286,31 @@ def execute_autonomous_calculation(db, data_tables, config, container):
     """Executa cálculo usando agente autônomo"""
     
     from .database_viewer import execute_autonomous_agent
+    from ...agents.log_utils import log_agent_action
     
     with container.container():
         st.markdown("## 🧮 Agente de Cálculo em Ação")
         st.markdown(f"**Configuração:** {config['name']}")
+        
+        # Debug: Log da configuração recebida
+        log_agent_action(
+            "calculation_debug",
+            "🔧 Configuração carregada",
+            {
+                "config_name": config['name'],
+                "available_tools": config.get('available_tools', []),
+                "tools_count": len(config.get('available_tools', [])),
+                "prompt_length": len(config.get('prompt', ''))
+            }
+        )
+        
+        # Exibir ferramentas selecionadas para o usuário
+        st.markdown("### 🛠️ Ferramentas Selecionadas:")
+        if config.get('available_tools'):
+            for tool in config['available_tools']:
+                st.markdown(f"• ✅ {tool}")
+        else:
+            st.warning("⚠️ Nenhuma ferramenta selecionada!")
         
         calculation_prompt = f"""
         CONTEXTO: Você é um agente especializado em cálculos de benefícios e análises de RH.

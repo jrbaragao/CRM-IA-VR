@@ -1,5 +1,0 @@
-# Configuração Mínima para SQLite
-DATABASE_URL=sqlite:///./vale_refeicao.db
-OPENAI_API_KEY=sk-...
-VALOR_DIA_UTIL=35.00
-DESCONTO_FUNCIONARIO_PCT=0.20

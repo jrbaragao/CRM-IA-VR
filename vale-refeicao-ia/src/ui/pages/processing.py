@@ -280,7 +280,8 @@ def process_files():
             
             for table in tables:
                 # Pular tabelas do sistema
-                if table in ['importacoes', 'agent_logs', 'calculation_configs']:
+                system_tables = ['importacoes', 'agent_logs', 'calculation_configs']
+                if table in system_tables:
                     continue
                 
                 # Obter informações da tabela
@@ -329,7 +330,7 @@ def process_files():
     metrics = [
         {'label': 'Arquivos Processados', 'value': len(processed_data)},
         {'label': 'Total de Registros', 'value': sum(d['processed_rows'] for d in processed_data.values())},
-        {'label': 'Tabelas Criadas', 'value': len([t for t in tables if t not in ['importacoes', 'agent_logs', 'calculation_configs']]) if 'tables' in locals() else 0},
+        {'label': 'Tabelas Criadas', 'value': len([t for t in tables if t not in system_tables]) if 'tables' in locals() else 0},
         {'label': 'Registros no Banco', 'value': total_registros_banco}
     ]
     render_metrics_row(metrics)

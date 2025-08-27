@@ -15,6 +15,15 @@ from ...data.database import get_db_manager
 from ...config.settings import settings
 from ...agents.log_utils import log_agent_action
 
+def get_system_tables():
+    """Retorna lista de tabelas do sistema que devem ser excluídas das análises"""
+    return ['importacoes', 'agent_logs', 'calculation_configs']
+
+def filter_data_tables(all_tables):
+    """Filtra apenas tabelas de dados, excluindo tabelas do sistema"""
+    system_tables = get_system_tables()
+    return [table for table in all_tables if table not in system_tables]
+
 def render():
     """Renderiza página de visualização do banco de dados"""
     st.header("🗃️ Visualizador de Banco de Dados")
@@ -42,8 +51,8 @@ def render():
             return
         
         # Separar tabelas do sistema das tabelas de dados
-        system_tables = ['importacoes', 'agent_logs', 'calculation_configs']
-        data_tables = [t for t in tables if t not in system_tables]
+        system_tables = get_system_tables()
+        data_tables = filter_data_tables(tables)
         
         # Métricas gerais
         total_registros = 0
@@ -592,8 +601,8 @@ def render_query_interface(db, tables):
         st.write(f"- Forçar aba Query: {'Sim' if st.session_state.get('force_query_tab', False) else 'Não'}")
     
     # Separar tabelas do sistema das tabelas de dados
-    system_tables = ['importacoes', 'agent_logs', 'calculation_configs']
-    data_tables = [t for t in tables if t not in system_tables]
+    system_tables = get_system_tables()
+    data_tables = filter_data_tables(tables)
     
     if not data_tables:
         st.warning("⚠️ Nenhuma tabela de dados disponível para consulta.")
@@ -768,9 +777,26 @@ def render_autonomous_agent_interface(db, data_tables):
             if not user_question.strip():
                 st.warning("⚠️ Digite uma pergunta primeiro!")
             else:
+                # LIMPAR COMPLETAMENTE qualquer cache/estado anterior
+                keys_to_clear = [
+                    'agent_analyses', 'current_generated_sql', 'current_question',
+                    'execute_current_sql', 'query_results', 'last_question',
+                    'cached_question', 'previous_analysis', 'agent_context'
+                ]
+                for key in keys_to_clear:
+                    if key in st.session_state:
+                        del st.session_state[key]
+                
                 # Container para o processo do agente
                 agent_container = st.empty()
-                execute_autonomous_agent(db, data_tables, user_question, {
+                
+                # Garantir que a pergunta atual é passada corretamente
+                current_question = user_question.strip()
+                
+                # Debug: Mostrar a pergunta que será passada
+                st.info(f"🔍 **Pergunta que será processada:** '{current_question}'")
+                
+                execute_autonomous_agent(db, data_tables, current_question, {
                     'max_iterations': max_iterations,
                     'exploration_depth': exploration_depth,
                     'include_insights': include_insights,
@@ -1553,6 +1579,21 @@ def execute_autonomous_agent(db, data_tables, question: str, config: dict, conta
         st.markdown("## 🧠 Agente Autônomo em Ação")
         st.markdown(f"**Pergunta:** {question}")
         
+        # Limpar qualquer cache de análises anteriores
+        if 'agent_analyses' in st.session_state:
+            # Não limpar completamente, mas garantir que não interfira
+            pass
+            
+        # Debug: Mostrar tabelas disponíveis para o agente
+        st.markdown("### 📊 Tabelas Disponíveis para Análise:")
+        if data_tables:
+            for table in data_tables:
+                table_info = db.get_table_info(table)
+                if table_info:
+                    st.markdown(f"• **{table}** ({table_info['total_rows']} registros)")
+        else:
+            st.warning("⚠️ Nenhuma tabela de dados disponível!")
+        
         # Inicializar progresso
         progress_bar = st.progress(0)
         status_text = st.empty()
@@ -1561,16 +1602,50 @@ def execute_autonomous_agent(db, data_tables, question: str, config: dict, conta
         steps_container = st.container()
         
         try:
-            # Configurar LLM
+            # Configurar LLM (nova instância para evitar cache)
             from llama_index.llms.openai import OpenAI
+            import uuid
             
             llm = OpenAI(
                 api_key=settings.openai_api_key,
                 model=settings.openai_model,
-                temperature=0.3
+                temperature=0.3,
+                # Forçar nova sessão
+                request_timeout=60.0,
+                max_retries=3
             )
             
-            # Inicializar histórico de análise
+            # Inicializar histórico de análise com ID único
+            import uuid
+            execution_id = str(uuid.uuid4())[:8]
+            
+            st.markdown(f"**🆔 ID da Execução:** `{execution_id}`")
+            st.markdown(f"**❓ Pergunta Atual:** `{question}`")
+            
+            # Mostrar o prompt que será enviado para o agente
+            with st.expander("🔍 Ver Prompt Enviado para o Agente", expanded=False):
+                st.markdown("**Este é o prompt exato que será enviado para o LLM:**")
+                
+                # Gerar o mesmo prompt que será usado
+                tables_list = ', '.join(data_tables) if data_tables else 'Nenhuma'
+                
+                planning_prompt_preview = f"""
+Você é um agente autônomo especializado. Seu objetivo é:
+
+{question}
+
+Tabelas disponíveis: {tables_list}
+
+Crie um plano estruturado em JSON com as chaves:
+- objectives: [lista dos objetivos baseados no prompt do usuário]
+- tables_to_use: [tabelas que serão utilizadas, se aplicável]
+- analysis_types: [tipos de análises necessárias]
+- steps: [sequência de etapas para atingir o objetivo]
+- challenges: [possíveis desafios]
+                """
+                
+                st.code(planning_prompt_preview, language="text")
+            
             analysis_steps = []
             iteration = 0
             max_iterations = config['max_iterations']
@@ -1579,7 +1654,7 @@ def execute_autonomous_agent(db, data_tables, question: str, config: dict, conta
             status_text.text("🔍 Etapa 1: Analisando pergunta e planejando abordagem...")
             progress_bar.progress(10)
             
-            planning_result = plan_analysis_approach(llm, question, data_tables, db, config)
+            planning_result = plan_analysis_approach(llm, question, data_tables, db, config, execution_id)
             analysis_steps.append({
                 'step': 1,
                 'action': 'Planejamento',
@@ -1589,10 +1664,16 @@ def execute_autonomous_agent(db, data_tables, question: str, config: dict, conta
             
             with steps_container:
                 render_analysis_step(analysis_steps[-1], config['show_reasoning'])
+                
+                # Mostrar resposta bruta do LLM para debug
+                with st.expander("🤖 Resposta Bruta do LLM - Etapa 1 (Debug)", expanded=False):
+                    st.markdown("**Resposta original do modelo na etapa de planejamento:**")
+                    if 'raw_response' in planning_result:
+                        st.code(planning_result['raw_response'], language="text")
+                    else:
+                        st.code(str(planning_result), language="json")
             
-            # Etapa 2: Exploração do esquema
-            status_text.text("📊 Etapa 2: Explorando estrutura dos dados...")
-            progress_bar.progress(25)
+            # Continuar com as etapas normais do agente autônomo
             
             schema_analysis = explore_data_schema(llm, data_tables, db, config)
             analysis_steps.append({
@@ -1608,6 +1689,7 @@ def execute_autonomous_agent(db, data_tables, question: str, config: dict, conta
             # Etapas iterativas de análise
             current_context = {
                 'question': question,
+                'user_objective': question,  # Objetivo original do usuário
                 'plan': planning_result,
                 'schema': schema_analysis,
                 'findings': []
@@ -1668,6 +1750,22 @@ def execute_autonomous_agent(db, data_tables, question: str, config: dict, conta
             
             with steps_container:
                 render_analysis_step(analysis_steps[-1], config['show_reasoning'])
+                
+                # Se deve gerar Excel, executar agora
+                if final_synthesis.get('generate_excel', False):
+                    st.markdown("### 📊 Gerando Planilha Excel...")
+                    excel_result = execute_excel_export_action(db, data_tables, current_context, len(analysis_steps))
+                    
+                    # Adicionar resultado do Excel como etapa adicional
+                    analysis_steps.append({
+                        'step': len(analysis_steps) + 1,
+                        'action': 'Exportação Excel',
+                        'description': 'Geração de planilha Excel com todos os dados',
+                        'result': excel_result
+                    })
+                    
+                    # Renderizar etapa do Excel
+                    render_analysis_step(analysis_steps[-1], config['show_reasoning'])
             
             # Completar progresso
             progress_bar.progress(100)
@@ -1727,242 +1825,1261 @@ def execute_autonomous_agent(db, data_tables, question: str, config: dict, conta
 
 # Funções auxiliares do agente autônomo
 
-def plan_analysis_approach(llm, question: str, data_tables: list, db, config: dict) -> dict:
-    """Planeja a abordagem de análise baseada na pergunta"""
+def plan_analysis_approach(llm, question: str, data_tables: list, db, config: dict, execution_id: str = None) -> dict:
+    """Planeja abordagem usando o prompt do usuário como objetivo principal"""
     
-    # Gerar contexto das tabelas
-    schema_context = generate_schema_context(db, data_tables)
+    # Informações básicas das tabelas disponíveis
+    tables_list = ', '.join(data_tables) if data_tables else 'Nenhuma'
     
+    # Usar o prompt do usuário como objetivo, apenas adicionando contexto mínimo
     planning_prompt = f"""
-    Você é um analista de dados experiente. Analise a pergunta do usuário e crie um plano detalhado de análise.
+Você é um agente autônomo especializado. Seu objetivo é:
 
-    PERGUNTA DO USUÁRIO: {question}
+{question}
 
-    TABELAS DISPONÍVEIS:
-    {schema_context}
+Tabelas disponíveis: {tables_list}
 
-    PROFUNDIDADE DE EXPLORAÇÃO: {config['exploration_depth']}
-
-    Crie um plano estruturado que inclua:
-    1. Objetivos principais da análise
-    2. Tabelas que serão utilizadas
-    3. Tipos de análises necessárias (estatísticas, correlações, etc.)
-    4. Sequência de etapas a serem executadas
-    5. Possíveis desafios e como superá-los
-
-    Responda em formato JSON com as chaves: objectives, tables_to_use, analysis_types, steps, challenges
+Crie um plano estruturado em JSON com as chaves:
+- objectives: [lista dos objetivos baseados no prompt do usuário]
+- tables_to_use: [tabelas que serão utilizadas, se aplicável]
+- analysis_types: [tipos de análises necessárias]
+- steps: [sequência de etapas para atingir o objetivo]
+- challenges: [possíveis desafios]
     """
     
     try:
         response = llm.complete(planning_prompt)
-        # Tentar parsear como JSON, se falhar, retornar estrutura básica
+        
+        # Tentar parsear como JSON
         import json
         try:
             plan = json.loads(response.text)
         except:
+            # Se falhar, criar estrutura básica baseada no prompt do usuário
             plan = {
-                "objectives": ["Analisar dados conforme solicitado"],
-                "tables_to_use": data_tables,
-                "analysis_types": ["Análise exploratória"],
-                "steps": ["Explorar dados", "Analisar padrões", "Gerar insights"],
-                "challenges": ["Qualidade dos dados"]
+                "objectives": [question],
+                "tables_to_use": data_tables if data_tables else [],
+                "analysis_types": ["Execução do objetivo especificado"],
+                "steps": ["Analisar objetivo", "Executar ações necessárias", "Fornecer resultado"],
+                "challenges": ["Interpretação correta do objetivo"]
             }
         
         return {
             "plan": plan,
-            "raw_response": response.text
+            "raw_response": response.text,
+            "user_objective": question
         }
     except Exception as e:
         return {
             "plan": {
-                "objectives": ["Analisar dados conforme solicitado"],
-                "tables_to_use": data_tables,
-                "analysis_types": ["Análise exploratória"],
-                "steps": ["Explorar dados", "Analisar padrões", "Gerar insights"],
-                "challenges": ["Qualidade dos dados"]
+                "objectives": [question],
+                "tables_to_use": data_tables if data_tables else [],
+                "analysis_types": ["Execução do objetivo especificado"],
+                "steps": ["Analisar objetivo", "Executar ações necessárias", "Fornecer resultado"],
+                "challenges": ["Interpretação correta do objetivo"]
             },
-            "error": str(e)
+            "error": str(e),
+            "user_objective": question
         }
 
 def explore_data_schema(llm, data_tables: list, db, config: dict) -> dict:
-    """Explora o esquema dos dados em detalhes"""
+    """Explora o esquema dos dados de forma compacta"""
     
     schema_details = {}
-    sample_data = {}
     
-    for table in data_tables:
-        # Obter informações da tabela
+    # Obter apenas informações essenciais das tabelas (limitado para evitar tokens)
+    for table in data_tables[:5]:  # Máximo 5 tabelas para análise de esquema
         table_info = db.get_table_info(table)
         if table_info:
-            schema_details[table] = table_info
-            
-            # Obter amostra de dados se configurado para exploração avançada
-            if config['exploration_depth'] in ['Intermediária', 'Avançada']:
-                try:
-                    sample_query = f'SELECT * FROM "{table}" LIMIT 5'
-                    df_sample = pd.read_sql(sample_query, db.engine)
-                    sample_data[table] = df_sample.to_dict('records')
-                except:
-                    sample_data[table] = []
+            # Manter apenas informações essenciais
+            schema_details[table] = {
+                'total_rows': table_info['total_rows'],
+                'columns': [col['name'] for col in table_info['columns'][:5]]  # Apenas nomes das primeiras 5 colunas
+            }
     
-    # Análise com IA se configurado
-    if config['exploration_depth'] == 'Avançada':
+    # Análise simplificada com IA apenas se necessário
+    if config['exploration_depth'] == 'Avançada' and len(data_tables) <= 3:
+        # Prompt compacto para análise
         analysis_prompt = f"""
-        Analise o esquema das tabelas e identifique:
-        1. Relacionamentos potenciais entre tabelas
-        2. Qualidade dos dados (campos vazios, inconsistências)
-        3. Oportunidades de análise
-        4. Possíveis problemas nos dados
-
-        ESQUEMA DAS TABELAS:
-        {schema_details}
-
-        AMOSTRAS DE DADOS:
-        {sample_data}
-
-        Forneça insights sobre a estrutura dos dados.
+Analise rapidamente:
+Tabelas: {list(schema_details.keys())}
+Identifique relacionamentos básicos.
+Resposta em 2-3 frases.
         """
         
         try:
             response = llm.complete(analysis_prompt)
-            ai_insights = response.text
+            ai_insights = response.text[:300]  # Limitar resposta
         except:
             ai_insights = "Análise automática não disponível"
     else:
-        ai_insights = "Análise básica do esquema"
+        ai_insights = f"Análise básica de {len(data_tables)} tabelas com relacionamentos por MATRICULA"
     
     return {
         "schema_details": schema_details,
-        "sample_data": sample_data,
         "ai_insights": ai_insights,
         "total_tables": len(data_tables),
         "total_columns": sum(len(info.get('columns', [])) for info in schema_details.values())
     }
 
 def execute_analysis_iteration(llm, db, data_tables: list, context: dict, config: dict, iteration: int) -> dict:
-    """Executa uma iteração de análise"""
+    """Executa uma iteração de análise usando IA para determinar próxima ação"""
     
-    # Determinar próxima ação baseada no contexto
+    # Obter contexto completo
+    plan = context.get('plan', {}).get('plan', {})
+    user_question = context.get('user_objective', context.get('question', ''))
+    previous_findings = context.get('findings', [])
+    schema_info = context.get('schema', {})
+    
+    # Extrair passos do plano se disponível (DEFINIR PRIMEIRO)
+    planned_steps = []
+    if isinstance(plan, dict) and 'steps' in plan:
+        planned_steps = plan['steps']
+    
+    # Definir total_steps ANTES de usar
+    total_steps = len(planned_steps) if planned_steps else 0
+    
+    # Debug: Log da iteração
+    if 'agent_logs' not in st.session_state:
+        st.session_state['agent_logs'] = []
+    
+    st.session_state['agent_logs'].append({
+        'timestamp': datetime.now().strftime('%H:%M:%S'),
+        'agent': 'analysis_iteration',
+        'action': f'🔄 Iteração {iteration}/{total_steps} - IA determinando ação',
+        'details': {
+            'question': user_question[:50],
+            'iteration': iteration,
+            'total_steps': total_steps,
+            'current_step': 'Calculando...',  # Será atualizado depois
+            'previous_steps': len(previous_findings),
+            'has_more_steps': iteration < total_steps
+        }
+    })
+    
+    # Preparar contexto das tabelas disponíveis (compacto para evitar excesso de tokens)
+    tables_context = ""
+    for table in data_tables[:8]:  # Máximo 8 tabelas no contexto
+        table_info = db.get_table_info(table)
+        if table_info:
+            columns = [col['name'] for col in table_info['columns'][:4]]  # 4 primeiras colunas
+            tables_context += f"- {table}: {table_info['total_rows']} registros\n"
+    
+    # Resumir descobertas anteriores (limitado para evitar excesso de tokens)
+    previous_summary = ""
+    if previous_findings:
+        for i, finding in enumerate(previous_findings[-1:], 1):  # Apenas última descoberta
+            if isinstance(finding, dict):
+                action = finding.get('action_type', 'ação')
+                findings_text = finding.get('findings', 'sem detalhes')[:100]  # Limitar a 100 chars
+                previous_summary += f"{i}. {action}: {findings_text}...\n"
+    
+    # Determinar qual passo do plano executar
+    current_step_info = ""
+    
+    if planned_steps and iteration <= len(planned_steps):
+        step_index = iteration - 1
+        if step_index < len(planned_steps):
+            current_step = planned_steps[step_index]
+            if isinstance(current_step, dict):
+                current_step_info = f"PASSO {iteration}/{total_steps}: {current_step.get('description', '')}"
+            else:
+                current_step_info = f"PASSO {iteration}/{total_steps}: {current_step}"
+    
+    # Prompt ultra-compacto para evitar excesso de tokens
+    # Extrair apenas informações essenciais
+    objective_short = user_question[:80] if user_question else "análise"
+    step_short = current_step_info.replace("PASSO ATUAL DO PLANO: ", "")[:150] if current_step_info else f"passo {iteration}"
+    tables_short = ', '.join(data_tables[:6])
+    
+    # Verificar se ainda há passos a executar
+    has_more_steps = iteration < total_steps
+    
     action_prompt = f"""
-    Você está na iteração {iteration} de uma análise de dados.
+OBJETIVO: {objective_short}
 
-    CONTEXTO ATUAL:
-    - Pergunta: {context['question']}
-    - Plano: {context['plan']}
-    - Esquema: {context['schema']}
-    - Descobertas anteriores: {context['findings'][-2:] if context['findings'] else 'Nenhuma'}
+{current_step_info}
 
-    Determine a próxima ação mais útil:
-    1. Consulta SQL específica para explorar dados
-    2. Análise estatística de uma tabela
-    3. Correlação entre tabelas
-    4. Verificação de qualidade dos dados
-    5. Finalizar análise (se já tem informações suficientes)
+TABELAS: {tables_short}
 
-    Responda com:
-    - action_type: tipo da ação (1-5)
-    - sql_query: consulta SQL se aplicável
-    - description: descrição da ação
-    - analysis_complete: true se análise deve ser finalizada
-    """
+IMPORTANTE: 
+- Você DEVE executar TODOS os {total_steps} passos do plano.
+- Escolha apenas a TABELA mais relevante para este passo
+- NÃO gere SQL - isso será feito automaticamente
+
+Iteração atual: {iteration}/{total_steps}
+{"CONTINUE executando o passo atual. NÃO marque como completo ainda." if has_more_steps else "Este é o ÚLTIMO passo. Pode marcar como completo."}
+
+Responda APENAS JSON:
+{{
+"action_type": "sql_query",
+"target_table": "nome_da_tabela_relevante",
+"description": "executando passo {iteration}: [descrição do que está fazendo]",
+"analysis_complete": {str(not has_more_steps).lower()}
+}}
+"""
     
     try:
+        # Usar IA para determinar próxima ação
         response = llm.complete(action_prompt)
         
-        # Parsear resposta (implementação simplificada)
-        response_text = response.text.lower()
+        # Tentar parsear resposta JSON
+        import json
+        import re
         
-        if "finalizar" in response_text or "analysis_complete: true" in response_text:
-            return {
-                "action_type": "finalize",
-                "description": "Análise considerada completa",
-                "analysis_complete": True,
-                "findings": "Dados suficientes coletados para conclusão"
-            }
-        
-        # Executar consulta exploratória simples
-        table = data_tables[iteration % len(data_tables)]  # Rotacionar entre tabelas
-        
-        queries = [
-            f'SELECT COUNT(*) as total_records FROM "{table}"',
-            f'SELECT * FROM "{table}" LIMIT 10',
-            f'SELECT COUNT(DISTINCT *) as unique_records FROM "{table}"'
-        ]
-        
-        query = queries[iteration % len(queries)]
+        # Log da resposta bruta para debug
+        st.session_state['agent_logs'].append({
+            'timestamp': datetime.now().strftime('%H:%M:%S'),
+            'agent': 'json_parser',
+            'action': f'📝 Resposta LLM Iteração {iteration}',
+            'details': {'raw_response': response.text[:200]}
+        })
         
         try:
-            df_result = pd.read_sql(query, db.engine)
-            query_result = df_result.to_dict('records')
-        except Exception as e:
-            query_result = f"Erro na consulta: {str(e)}"
+            # Tentar parse direto
+            action_plan = json.loads(response.text)
+        except:
+            try:
+                # Tentar extrair JSON de dentro do texto
+                json_match = re.search(r'\{.*\}', response.text, re.DOTALL)
+                if json_match:
+                    json_text = json_match.group(0)
+                    action_plan = json.loads(json_text)
+                else:
+                    raise ValueError("Nenhum JSON encontrado")
+            except:
+                # Se ainda falhar, criar plano baseado no passo atual do plano original
+                response_text = response.text.lower()
+                
+                # Verificar se menciona análise completa
+                if "analysis_complete" in response_text and "true" in response_text:
+                    return {
+                        "action_type": "analysis_complete",
+                        "description": "Análise considerada completa pela IA",
+                        "analysis_complete": True,
+                        "findings": "IA determinou que objetivo foi atingido",
+                        "ai_reasoning": response.text,
+                        "parse_error": "JSON inválido, mas detectou conclusão"
+                    }
+                
+                # Tentar seguir o plano mesmo com erro de JSON
+                if planned_steps and iteration <= len(planned_steps):
+                    step_index = iteration - 1
+                    if step_index < len(planned_steps):
+                        current_step = planned_steps[step_index]
+                        step_desc = ""
+                        if isinstance(current_step, dict):
+                            step_desc = current_step.get('description', '')
+                        else:
+                            step_desc = str(current_step)
+                        
+                        # Tentar identificar tabela e ação baseado no passo do plano
+                        target_table = None
+                        sql_query = None
+                        
+                        # Analisar descrição do passo para extrair tabela e ação
+                        step_lower = step_desc.lower()
+                        
+                        # Identificar tabela mencionada no passo (melhorada)
+                        # Primeiro, tentar encontrar tabela mencionada explicitamente
+                        for table in data_tables:
+                            if table.lower() in step_lower:
+                                target_table = table
+                                break
+                        
+                        # Se não encontrou, usar lógica inteligente baseada no passo
+                        if not target_table:
+                            if iteration == 1 or "ativo" in step_lower or "colaborador" in step_lower:
+                                # Passo 1: Priorizar tabela de ativos
+                                for table in data_tables:
+                                    if "ativo" in table.lower():
+                                        target_table = table
+                                        break
+                            elif iteration == 2 or "consultar" in step_lower:
+                                # Passo 2: Continuar com ativos ou primeira tabela disponível
+                                for table in data_tables:
+                                    if "ativo" in table.lower():
+                                        target_table = table
+                                        break
+                            elif iteration >= 3 and iteration <= 4 and ("excluir" in step_lower or "férias" in step_lower or "afastamento" in step_lower):
+                                # Passos 3-4: Priorizar tabelas de exclusão
+                                exclusion_tables = ["ferias", "afastamentos", "aprendiz", "estagio", "exterior", "desligados"]
+                                for table in data_tables:
+                                    if any(excl in table.lower() for excl in exclusion_tables):
+                                        target_table = table
+                                        break
+                            elif iteration >= 5 and ("sindicato" in step_lower or "valor" in step_lower):
+                                # Passo 5+: Priorizar tabela de valores
+                                for table in data_tables:
+                                    if "sindicato" in table.lower() or "valor" in table.lower():
+                                        target_table = table
+                                        break
+                        
+                        # Fallback final: usar primeira tabela disponível
+                        if not target_table and data_tables:
+                            target_table = data_tables[0]
+                        
+                        # Gerar consulta SQL SEGURA baseada no passo
+                        if target_table:
+                            # Obter informações da tabela para consultas seguras
+                            table_info = db.get_table_info(target_table)
+                            available_columns = []
+                            if table_info and 'columns' in table_info:
+                                available_columns = [col['name'] for col in table_info['columns']]
+                            
+                            # Consultas SEGURAS que não dependem de colunas específicas
+                            if iteration == 1:
+                                # Passo 1: Sempre começar explorando a tabela
+                                if available_columns and any(col.upper() in ['MATRICULA', 'NOME'] for col in available_columns):
+                                    # Se tem MATRICULA e NOME, usar essas colunas
+                                    matricula_col = next((col for col in available_columns if col.upper() == 'MATRICULA'), None)
+                                    nome_col = next((col for col in available_columns if col.upper() == 'NOME'), None)
+                                    if matricula_col and nome_col:
+                                        sql_query = f'SELECT "{matricula_col}", "{nome_col}" FROM "{target_table}" LIMIT 100'
+                                    else:
+                                        sql_query = f'SELECT * FROM "{target_table}" LIMIT 50'
+                                else:
+                                    sql_query = f'SELECT * FROM "{target_table}" LIMIT 50'
+                            elif iteration == 2:
+                                # Passo 2: Explorar estrutura da tabela
+                                sql_query = f'SELECT * FROM "{target_table}" LIMIT 100'
+                            elif iteration == 3:
+                                # Passo 3: Identificar registros (sem filtros específicos)
+                                if available_columns and any(col.upper() == 'MATRICULA' for col in available_columns):
+                                    matricula_col = next((col for col in available_columns if col.upper() == 'MATRICULA'), None)
+                                    sql_query = f'SELECT "{matricula_col}" FROM "{target_table}" LIMIT 50'
+                                else:
+                                    sql_query = f'SELECT * FROM "{target_table}" LIMIT 50'
+                            elif iteration == 4:
+                                # Passo 4: Contar registros (sempre seguro)
+                                sql_query = f'SELECT COUNT(*) as total_registros FROM "{target_table}"'
+                            elif iteration == 5:
+                                # Passo 5: Explorar dados para valores
+                                sql_query = f'SELECT * FROM "{target_table}" LIMIT 50'
+                            elif iteration == 6:
+                                # Passo 6: Análise de dados
+                                sql_query = f'SELECT * FROM "{target_table}" LIMIT 100'
+                            elif iteration == 7:
+                                # Passo 7: Preparar relatório
+                                sql_query = f'SELECT * FROM "{target_table}" LIMIT 200'
+                            elif iteration >= 8:
+                                # Passo 8+: Contagem final
+                                sql_query = f'SELECT COUNT(*) as total_para_exportacao FROM "{target_table}"'
+                            else:
+                                # Fallback sempre seguro - sem WHERE com colunas específicas
+                                sql_query = f'SELECT * FROM "{target_table}" LIMIT 50'
+                        
+                        if not target_table and data_tables:
+                            target_table = data_tables[0]
+                            sql_query = f'SELECT * FROM "{target_table}" LIMIT 10'
+                        
+                        # Log detalhado para debug
+                        st.session_state['agent_logs'].append({
+                            'timestamp': datetime.now().strftime('%H:%M:%S'),
+                            'agent': 'fallback_sql_generator',
+                            'action': f'🔧 Fallback - Gerando SQL para passo {iteration}',
+                            'details': {
+                                'step_desc': step_desc[:100],
+                                'target_table': target_table,
+                                'sql_query': sql_query[:100] if sql_query else 'None',
+                                'iteration': iteration,
+                                'total_steps': total_steps
+                            }
+                        })
+                        
+                        action_plan = {
+                            "action_type": "sql_query",
+                            "target_table": target_table,
+                            "sql_query": sql_query,
+                            "description": f"Executando passo {iteration}/{total_steps}: {step_desc}",
+                            "reasoning": f"Seguindo plano original - Passo {iteration}: {step_desc}",
+                            "analysis_complete": iteration >= total_steps,  # Só completa quando executar TODOS os passos
+                            "parse_error": "JSON inválido, usando plano original"
+                        }
+                    else:
+                        # Sem mais passos no plano
+                        action_plan = {
+                            "action_type": "analysis_complete",
+                            "description": "Todos os passos do plano foram executados",
+                            "analysis_complete": True,
+                            "reasoning": "Plano original completado",
+                            "parse_error": "JSON inválido, mas plano concluído"
+                        }
+                else:
+                    # Fallback final - ação genérica
+                    target_table = data_tables[0] if data_tables else None
+                    action_plan = {
+                        "action_type": "sql_query",
+                        "target_table": target_table,
+                        "sql_query": f'SELECT * FROM "{target_table}" LIMIT 10' if target_table else None,
+                        "description": f"Exploração da tabela {target_table}",
+                        "reasoning": "Fallback devido a erro no parse JSON",
+                        "analysis_complete": iteration >= 3,
+                        "parse_error": "JSON inválido, usando fallback"
+                    }
+        
+        # Executar ação determinada pela IA
+        action_type = action_plan.get("action_type", "sql_query")
+        
+        if action_type == "analysis_complete":
+            return {
+                "action_type": "analysis_complete",
+                "description": action_plan.get("description", "Análise completa"),
+                "analysis_complete": True,
+                "findings": action_plan.get("reasoning", "Objetivo atingido"),
+                "ai_reasoning": action_plan.get("reasoning", "")
+            }
+        
+        elif action_type == "excel_export" and "excel_export" in config.get('available_tools', []):
+            return execute_excel_export_action(db, data_tables, context, iteration)
+        
+        # NOVA TOOL: Cálculo de Vale Refeição
+        elif action_type == "calculo_vale_refeicao" and "calculo_vale_refeicao" in config.get('available_tools', []):
+            result = calculo_vale_refeicao_tool(db, data_tables)
+            
+            # Se o cálculo foi bem-sucedido e tem Excel disponível, gerar automaticamente
+            if result.get('success', False) and result.get('auto_export_excel', False) and "excel_export" in config.get('available_tools', []):
+                st.session_state['agent_logs'].append({
+                    'timestamp': datetime.now().strftime('%H:%M:%S'),
+                    'agent': 'auto_excel_trigger',
+                    'action': '📊 Cálculo concluído - Gerando planilha Excel automaticamente',
+                    'details': {
+                        'elegiveis': result.get('total_records', 0),
+                        'valor_total': result.get('findings', '')
+                    }
+                })
+                
+                # Adicionar resultado do cálculo ao contexto para a exportação usar
+                context['findings'].append(result)
+                
+                # Gerar Excel automaticamente
+                excel_result = execute_excel_export_action(db, data_tables, context, iteration)
+                
+                # Combinar resultados
+                result['excel_generated'] = True
+                result['excel_filename'] = excel_result.get('filename', '')
+                result['description'] += f" + Planilha Excel gerada: {excel_result.get('filename', 'arquivo.xlsx')}"
+            
+            return result
+        
+        # Se a IA menciona cálculo de vale refeição
+        elif ("vale refeição" in action_plan.get("description", "").lower() or 
+              "calculo" in action_plan.get("description", "").lower() or
+              "calcular" in action_plan.get("description", "").lower()):
+            if "calculo_vale_refeicao" in config.get('available_tools', []):
+                result = calculo_vale_refeicao_tool(db, data_tables)
+                
+                # Auto-gerar Excel se bem-sucedido
+                if result.get('success', False) and result.get('auto_export_excel', False) and "excel_export" in config.get('available_tools', []):
+                    context['findings'].append(result)
+                    excel_result = execute_excel_export_action(db, data_tables, context, iteration)
+                    result['excel_generated'] = True
+                    result['excel_filename'] = excel_result.get('filename', '')
+                    result['description'] += f" + Planilha Excel gerada: {excel_result.get('filename', 'arquivo.xlsx')}"
+                
+                return result
+        
+        # Se a IA menciona exportação mas não especificou o tipo correto
+        elif ("excel" in action_plan.get("description", "").lower() or 
+              "planilha" in action_plan.get("description", "").lower() or
+              "export" in action_plan.get("description", "").lower()):
+            return execute_excel_export_action(db, data_tables, context, iteration)
+        
+        # Se é o último passo e tem ferramenta de Excel, forçar exportação APENAS se todos os passos foram executados
+        elif iteration >= total_steps and "excel_export" in config.get('available_tools', []):
+            st.session_state['agent_logs'].append({
+                'timestamp': datetime.now().strftime('%H:%M:%S'),
+                'agent': 'excel_auto_trigger',
+                'action': f'📊 Último passo ({iteration}/{total_steps}) - Forçando geração de planilha final',
+                'details': {
+                    'iteration': iteration, 
+                    'total_steps': total_steps,
+                    'all_steps_completed': True
+                }
+            })
+            # Marcar como completo na exportação final
+            result = execute_excel_export_action(db, data_tables, context, iteration)
+            result["analysis_complete"] = True  # AGORA sim, marcar como completo
+            result["final_step"] = True
+            return result
+        
+        elif action_type == "sql_query":
+            target_table = action_plan.get("target_table")
+            sql_query = action_plan.get("sql_query")
+            
+            # USAR O SISTEMA TEXT-TO-QUERY EXISTENTE para gerar SQL seguro
+            if not target_table and data_tables:
+                target_table = data_tables[0]
+            
+            if target_table:
+                # Gerar contexto do esquema para a tabela específica
+                schema_context = generate_schema_context(db, [target_table])
+                
+                # Criar pergunta ESPECÍFICA baseada no passo atual e contexto do vale refeição
+                step_description = action_plan.get('description', f'análise passo {iteration}')
+                
+                # Gerar pergunta mais específica baseada no número do passo e contexto
+                if iteration == 1 and "ativo" in target_table.lower():
+                    step_question = f"Listar todos os colaboradores ativos da tabela {target_table} com MATRICULA e NOME para identificar quem tem direito ao vale refeição"
+                elif iteration == 2 and ("ferias" in target_table.lower() or "afastamento" in target_table.lower()):
+                    step_question = f"Identificar MATRICULAS de colaboradores em férias ou afastados na tabela {target_table} que NÃO devem receber vale refeição"
+                elif iteration == 3 and ("aprendiz" in target_table.lower() or "estagio" in target_table.lower()):
+                    step_question = f"Listar MATRICULAS de aprendizes e estagiários na tabela {target_table} que são excluídos do vale refeição"
+                elif iteration == 4 and ("exterior" in target_table.lower() or "desligado" in target_table.lower()):
+                    step_question = f"Identificar MATRICULAS de colaboradores no exterior ou desligados na tabela {target_table} para exclusão do vale refeição"
+                elif iteration >= 5 and ("sindicato" in target_table.lower() or "valor" in target_table.lower()):
+                    step_question = f"Consultar valores de vale refeição por sindicato na tabela {target_table} para calcular o benefício de 22 dias úteis por colaborador"
+                elif iteration >= 7:
+                    step_question = f"Calcular o valor total de vale refeição multiplicando valor diário por 22 dias para cada colaborador elegível usando dados da tabela {target_table}"
+                else:
+                    # Fallback com contexto de vale refeição
+                    step_question = f"Analisar dados da tabela {target_table} para {step_description} no contexto de cálculo de vale refeição considerando 22 dias úteis"
+                
+                # Usar a função text-to-query existente que já valida colunas
+                try:
+                    generated_sql = generate_sql_from_prompt(step_question, schema_context)
+                    if generated_sql and generated_sql.strip():
+                        sql_query = generated_sql
+                        
+                        # Log do uso do text-to-query
+                        st.session_state['agent_logs'].append({
+                            'timestamp': datetime.now().strftime('%H:%M:%S'),
+                            'agent': 'text_to_query_integration',
+                            'action': f'🔄 Usando Text-to-Query para passo {iteration}',
+                            'details': {
+                                'target_table': target_table,
+                                'question': step_question[:100],
+                                'generated_sql': sql_query[:100],
+                                'iteration': iteration
+                            }
+                        })
+                    else:
+                        # Fallback se text-to-query falhar
+                        sql_query = f'SELECT * FROM "{target_table}" LIMIT 50'
+                except Exception as e:
+                    # Fallback seguro se text-to-query falhar
+                    sql_query = f'SELECT * FROM "{target_table}" LIMIT 50'
+                    st.session_state['agent_logs'].append({
+                        'timestamp': datetime.now().strftime('%H:%M:%S'),
+                        'agent': 'text_to_query_fallback',
+                        'action': f'⚠️ Text-to-Query falhou, usando fallback',
+                        'details': {
+                            'error': str(e),
+                            'fallback_sql': sql_query,
+                            'iteration': iteration
+                        }
+                    })
+            else:
+                return {
+                    "action_type": "error",
+                    "description": "Nenhuma tabela disponível para consulta",
+                    "error": "Sem tabelas de dados disponíveis",
+                    "analysis_complete": True,
+                    "findings": "Erro: Nenhuma tabela de dados encontrada"
+                }
+            
+            # Executar consulta SQL
+            try:
+                df_result = pd.read_sql(sql_query, db.engine)
+                query_result = df_result.to_dict('records')
+                
+                # Determinar se análise está completa baseado na resposta da IA
+                # MAS forçar a continuar se ainda há passos no plano
+                # IMPORTANTE: Só marcar como completo se executou TODOS os passos do plano
+                ai_says_complete = action_plan.get("analysis_complete", False)
+                all_steps_executed = iteration >= total_steps
+                analysis_complete = ai_says_complete and all_steps_executed
+                
+                # Log para debug da decisão de completude
+                st.session_state['agent_logs'].append({
+                    'timestamp': datetime.now().strftime('%H:%M:%S'),
+                    'agent': 'completion_logic',
+                    'action': f'🎯 Verificando completude - Passo {iteration}/{total_steps}',
+                    'details': {
+                        'ai_says_complete': ai_says_complete,
+                        'all_steps_executed': all_steps_executed,
+                        'final_decision': analysis_complete,
+                        'iteration': iteration,
+                        'total_steps': total_steps
+                    }
+                })
+                
+                return {
+                    "action_type": "ai_guided_query",
+                    "sql_query": sql_query,
+                    "description": action_plan.get("description", f"Consulta na tabela {target_table}"),
+                    "query_result": query_result,
+                    "target_table": target_table,
+                    "analysis_complete": analysis_complete,
+                    "findings": action_plan.get("reasoning", f"Dados coletados da tabela {target_table}"),
+                    "ai_reasoning": action_plan.get("reasoning", ""),
+                    "result_count": len(df_result) if not df_result.empty else 0
+                }
+                
+            except Exception as e:
+                return {
+                    "action_type": "query_error",
+                    "description": f"Erro ao executar consulta determinada pela IA",
+                    "error": str(e),
+                    "sql_query": sql_query,
+                    "target_table": target_table,
+                    "analysis_complete": True,
+                    "findings": f"Erro na consulta: {str(e)}"
+                }
+        
+        else:
+            return {
+                "action_type": "unknown_action",
+                "description": f"Tipo de ação não reconhecido: {action_type}",
+                "analysis_complete": True,
+                "findings": "IA sugeriu ação não implementada"
+            }
+            
+    except Exception as e:
+        return {
+            "action_type": "iteration_error",
+            "description": f"Erro na iteração {iteration}",
+            "error": str(e),
+            "analysis_complete": True,
+            "findings": f"Erro geral na iteração: {str(e)}"
+        }
+
+def calculo_vale_refeicao_tool(db, data_tables: list) -> dict:
+    """
+    Tool especializada para cálculo de vale refeição
+    Implementa a lógica de negócio específica do RH brasileiro
+    """
+    try:
+        import pandas as pd
+        from datetime import datetime
+        
+        # Log do início do cálculo
+        st.session_state['agent_logs'].append({
+            'timestamp': datetime.now().strftime('%H:%M:%S'),
+            'agent': 'calculo_vale_refeicao',
+            'action': '🧮 Iniciando cálculo de vale refeição',
+            'details': {
+                'tabelas_disponiveis': data_tables,
+                'dias_uteis': 22
+            }
+        })
+        
+        # 1. BUSCAR COLABORADORES ATIVOS
+        if 'ativos' not in data_tables:
+            return {
+                "action_type": "calculation_error",
+                "description": "Tabela 'ativos' não encontrada",
+                "error": "Tabela obrigatória 'ativos' não está disponível",
+                "success": False
+            }
+        
+        ativos_df = pd.read_sql('SELECT * FROM "ativos"', db.engine)
+        total_ativos = len(ativos_df)
+        
+        st.session_state['agent_logs'].append({
+            'timestamp': datetime.now().strftime('%H:%M:%S'),
+            'agent': 'calculo_vale_refeicao',
+            'action': f'📊 Carregados {total_ativos} colaboradores ativos',
+            'details': {'total_ativos': total_ativos}
+        })
+        
+        # 2. BUSCAR TABELAS DE EXCLUSÃO
+        exclusoes = {}
+        tabelas_exclusao = ['ferias', 'afastamentos', 'aprendiz', 'exterior', 'desligados']
+        
+        for tabela in tabelas_exclusao:
+            if tabela in data_tables:
+                try:
+                    df_exclusao = pd.read_sql(f'SELECT MATRICULA FROM "{tabela}"', db.engine)
+                    exclusoes[tabela] = set(df_exclusao['MATRICULA'].astype(str))
+                    
+                    st.session_state['agent_logs'].append({
+                        'timestamp': datetime.now().strftime('%H:%M:%S'),
+                        'agent': 'calculo_vale_refeicao',
+                        'action': f'🚫 Exclusões {tabela}: {len(exclusoes[tabela])} registros',
+                        'details': {'tabela': tabela, 'total_exclusoes': len(exclusoes[tabela])}
+                    })
+                except Exception as e:
+                    st.session_state['agent_logs'].append({
+                        'timestamp': datetime.now().strftime('%H:%M:%S'),
+                        'agent': 'calculo_vale_refeicao',
+                        'action': f'⚠️ Erro ao carregar {tabela}: {str(e)}',
+                        'details': {'tabela': tabela, 'erro': str(e)}
+                    })
+        
+        # 3. DEFINIR VALORES POR ESTADO (baseado no sindicato)
+        valor_sp = 37.50  # São Paulo - sindicatos com "SP" no nome
+        valor_outros = 35.00  # Outros estados
+        valores_sindicato = {}  # Inicializar dicionário de valores por sindicato
+        
+        st.session_state['agent_logs'].append({
+            'timestamp': datetime.now().strftime('%H:%M:%S'),
+            'agent': 'calculo_vale_refeicao',
+            'action': '💰 Regra de valores por estado definida',
+            'details': {
+                'regra': 'Sindicatos com "SP" no nome = R$ 37,50 | Outros = R$ 35,00',
+                'valor_sp': f'R$ {valor_sp}',
+                'valor_outros': f'R$ {valor_outros}',
+                'exemplo_sp': 'SINDPD SP - SIND.TRAB.EM PROC DADOS...'
+            }
+        })
+        
+        if 'base_sindicato_x_valor' in data_tables:
+            try:
+                sindicato_df = pd.read_sql('SELECT * FROM "base_sindicato_x_valor"', db.engine)
+                
+                st.session_state['agent_logs'].append({
+                    'timestamp': datetime.now().strftime('%H:%M:%S'),
+                    'agent': 'calculo_vale_refeicao',
+                    'action': f'🔍 Estrutura da tabela sindicato: {list(sindicato_df.columns)}',
+                    'details': {'colunas': list(sindicato_df.columns), 'registros': len(sindicato_df)}
+                })
+                
+                # Tentar diferentes combinações de nomes de colunas
+                sindicato_col = None
+                valor_col = None
+                
+                # Buscar coluna de sindicato
+                for col in sindicato_df.columns:
+                    col_lower = col.lower()
+                    if any(term in col_lower for term in ['sindicato', 'sindic', 'categoria', 'tipo']):
+                        sindicato_col = col
+                        break
+                
+                # Buscar coluna de valor
+                for col in sindicato_df.columns:
+                    col_lower = col.lower()
+                    if any(term in col_lower for term in ['valor', 'preco', 'price', 'amount', 'vr']):
+                        valor_col = col
+                        break
+                
+                if sindicato_col and valor_col:
+                    for _, row in sindicato_df.iterrows():
+                        sindicato_key = str(row[sindicato_col]).strip()
+                        valor = float(row[valor_col]) if pd.notna(row[valor_col]) else valor_padrao
+                        valores_sindicato[sindicato_key] = valor
+                    
+                    st.session_state['agent_logs'].append({
+                        'timestamp': datetime.now().strftime('%H:%M:%S'),
+                        'agent': 'calculo_vale_refeicao',
+                        'action': f'💰 Valores carregados: {len(valores_sindicato)} sindicatos',
+                        'details': {
+                            'sindicato_col': sindicato_col,
+                            'valor_col': valor_col,
+                            'valores_encontrados': len(valores_sindicato),
+                            'exemplo_valores': dict(list(valores_sindicato.items())[:3])
+                        }
+                    })
+                else:
+                    st.session_state['agent_logs'].append({
+                        'timestamp': datetime.now().strftime('%H:%M:%S'),
+                        'agent': 'calculo_vale_refeicao',
+                        'action': f'⚠️ Colunas não identificadas - usando valor padrão R$ {valor_padrao}',
+                        'details': {
+                            'colunas_disponiveis': list(sindicato_df.columns),
+                            'sindicato_col_encontrada': sindicato_col,
+                            'valor_col_encontrada': valor_col
+                        }
+                    })
+                    
+            except Exception as e:
+                st.session_state['agent_logs'].append({
+                    'timestamp': datetime.now().strftime('%H:%M:%S'),
+                    'agent': 'calculo_vale_refeicao',
+                    'action': f'⚠️ Erro ao carregar valores de sindicato: {str(e)}',
+                    'details': {'erro': str(e)}
+                })
+        else:
+            st.session_state['agent_logs'].append({
+                'timestamp': datetime.now().strftime('%H:%M:%S'),
+                'agent': 'calculo_vale_refeicao',
+                'action': f'⚠️ Tabela base_sindicato_x_valor não encontrada - usando valor padrão R$ {valor_padrao}',
+                'details': {'valor_padrao': valor_padrao}
+            })
+        
+        # 4. LOOP PELOS COLABORADORES ATIVOS - LÓGICA PRINCIPAL
+        resultados = []
+        total_processados = 0
+        total_elegiveis = 0
+        total_excluidos = 0
+        valor_total_geral = 0
+        
+        st.session_state['agent_logs'].append({
+            'timestamp': datetime.now().strftime('%H:%M:%S'),
+            'agent': 'calculo_vale_refeicao',
+            'action': '🔄 Iniciando loop de cálculo por colaborador',
+            'details': {'total_para_processar': total_ativos}
+        })
+        
+        for index, colaborador in ativos_df.iterrows():
+            total_processados += 1
+            
+            # Obter dados do colaborador
+            matricula = str(colaborador.get('MATRICULA', ''))
+            nome = str(colaborador.get('NOME', 'Nome não informado'))
+            sindicato = str(colaborador.get('SINDICATO', ''))
+            
+            # VERIFICAR EXCLUSÕES
+            motivo_exclusao = None
+            
+            # Verificar cada tipo de exclusão
+            for tipo_exclusao, matriculas_excluidas in exclusoes.items():
+                if matricula in matriculas_excluidas:
+                    motivo_exclusao = tipo_exclusao
+                    break
+            
+            if motivo_exclusao:
+                # COLABORADOR EXCLUÍDO
+                total_excluidos += 1
+                
+                # Determinar estado mesmo para excluídos (para informação)
+                sindicato_upper = sindicato.upper().strip()
+                if ' SP ' in sindicato_upper or sindicato_upper.startswith('SP ') or sindicato_upper.endswith(' SP') or 'ESTADO DE SP' in sindicato_upper:
+                    estado_info = 'SP'
+                else:
+                    estado_info = 'OUTROS'
+                
+                resultados.append({
+                    'MATRICULA': matricula,
+                    'NOME': nome,
+                    'SINDICATO': sindicato,
+                    'ESTADO': estado_info,
+                    'STATUS': 'EXCLUÍDO',
+                    'MOTIVO_EXCLUSAO': motivo_exclusao.upper(),
+                    'DIAS_ELEGIVEL': 0,
+                    'VALOR_DIARIO': 0.0,
+                    'VALOR_TOTAL_VR': 0.0
+                })
+            else:
+                # COLABORADOR ELEGÍVEL
+                total_elegiveis += 1
+                
+                # Determinar valor baseado no sindicato (verificar se contém "SP")
+                sindicato_upper = sindicato.upper().strip()
+                
+                if ' SP ' in sindicato_upper or sindicato_upper.startswith('SP ') or sindicato_upper.endswith(' SP') or 'ESTADO DE SP' in sindicato_upper:
+                    valor_diario = valor_sp  # R$ 37,50 para São Paulo
+                    estado_info = 'SP'
+                else:
+                    valor_diario = valor_outros  # R$ 35,00 para outros estados
+                    estado_info = 'OUTROS'
+                
+                # Tentar buscar valor específico do sindicato se disponível na tabela (sobrescreve o padrão)
+                if sindicato in valores_sindicato and valores_sindicato[sindicato] > 0:
+                    valor_diario = valores_sindicato[sindicato]
+                    estado_info += f' (Tabela: R$ {valor_diario})'
+                
+                # Calcular valor total (22 dias úteis)
+                dias_elegiveis = 22
+                valor_total_vr = valor_diario * dias_elegiveis
+                valor_total_geral += valor_total_vr
+                
+                resultados.append({
+                    'MATRICULA': matricula,
+                    'NOME': nome,
+                    'SINDICATO': sindicato,
+                    'ESTADO': estado_info,
+                    'STATUS': 'ELEGÍVEL',
+                    'MOTIVO_EXCLUSAO': '',
+                    'DIAS_ELEGIVEL': dias_elegiveis,
+                    'VALOR_DIARIO': valor_diario,
+                    'VALOR_TOTAL_VR': valor_total_vr
+                })
+        
+        # 5. GERAR DATAFRAME FINAL
+        resultado_df = pd.DataFrame(resultados)
+        
+        # 6. ESTATÍSTICAS FINAIS (incluindo por estado)
+        # Contar por estado
+        elegiveis_sp = len([r for r in resultados if r['STATUS'] == 'ELEGÍVEL' and r['ESTADO'] == 'SP'])
+        elegiveis_outros = len([r for r in resultados if r['STATUS'] == 'ELEGÍVEL' and r['ESTADO'] == 'OUTROS'])
+        valor_total_sp = sum([r['VALOR_TOTAL_VR'] for r in resultados if r['STATUS'] == 'ELEGÍVEL' and r['ESTADO'] == 'SP'])
+        valor_total_outros = sum([r['VALOR_TOTAL_VR'] for r in resultados if r['STATUS'] == 'ELEGÍVEL' and r['ESTADO'] == 'OUTROS'])
+        
+        estatisticas = {
+            'total_colaboradores': total_ativos,
+            'total_elegiveis': total_elegiveis,
+            'total_excluidos': total_excluidos,
+            'elegiveis_sp': elegiveis_sp,
+            'elegiveis_outros': elegiveis_outros,
+            'valor_total_geral': valor_total_geral,
+            'valor_total_sp': valor_total_sp,
+            'valor_total_outros': valor_total_outros,
+            'valor_medio_por_elegivel': valor_total_geral / total_elegiveis if total_elegiveis > 0 else 0,
+            'percentual_elegiveis': (total_elegiveis / total_ativos * 100) if total_ativos > 0 else 0,
+            'percentual_sp': (elegiveis_sp / total_elegiveis * 100) if total_elegiveis > 0 else 0
+        }
+        
+        # Log final
+        st.session_state['agent_logs'].append({
+            'timestamp': datetime.now().strftime('%H:%M:%S'),
+            'agent': 'calculo_vale_refeicao',
+            'action': '✅ Cálculo de vale refeição concluído',
+            'details': {
+                'total_processados': total_processados,
+                'elegiveis_total': total_elegiveis,
+                'elegiveis_sp': f'{elegiveis_sp} (R$ 37,50/dia)',
+                'elegiveis_outros': f'{elegiveis_outros} (R$ 35,00/dia)',
+                'excluidos': total_excluidos,
+                'valor_total_geral': f'R$ {valor_total_geral:,.2f}',
+                'valor_sp': f'R$ {valor_total_sp:,.2f}',
+                'valor_outros': f'R$ {valor_total_outros:,.2f}',
+                'percentual_elegiveis': f'{estatisticas["percentual_elegiveis"]:.1f}%'
+            }
+        })
         
         return {
-            "action_type": "sql_query",
-            "sql_query": query,
-            "description": f"Análise exploratória da tabela {table}",
-            "query_result": query_result,
-            "analysis_complete": iteration >= 3,  # Completar após 3 iterações por padrão
-            "findings": f"Dados coletados da tabela {table}"
+            "action_type": "calculo_vale_refeicao",
+            "description": f"Cálculo de vale refeição concluído: {total_elegiveis} elegíveis de {total_ativos} colaboradores",
+            "success": True,
+            "resultado_df": resultado_df,
+            "estatisticas": estatisticas,
+            "total_records": len(resultado_df),
+            "analysis_complete": True,  # MARCAR COMO COMPLETO - cálculo específico já foi feito
+            "findings": f"Processados {total_ativos} colaboradores: {total_elegiveis} elegíveis, {total_excluidos} excluídos. Valor total: R$ {valor_total_geral:,.2f}",
+            "auto_export_excel": True  # Sinalizar para exportar automaticamente
+        }
+        
+    except Exception as e:
+        st.session_state['agent_logs'].append({
+            'timestamp': datetime.now().strftime('%H:%M:%S'),
+            'agent': 'calculo_vale_refeicao',
+            'action': f'❌ Erro no cálculo: {str(e)}',
+            'details': {'erro': str(e)}
+        })
+        
+        return {
+            "action_type": "calculation_error",
+            "description": f"Erro no cálculo de vale refeição: {str(e)}",
+            "error": str(e),
+            "success": False,
+            "analysis_complete": True
+        }
+
+def execute_excel_export_action(db, data_tables: list, context: dict, iteration: int) -> dict:
+    """Executa ação de exportação Excel pelo agente autônomo"""
+    
+    try:
+        # Importar ferramenta de Excel
+        from ...utils.excel_generator import execute_excel_export_tool
+        
+        # Verificar se há resultados de cálculo de vale refeição no contexto
+        export_data = {}
+        total_records = 0
+        
+        # PRIORIDADE: Usar resultados de cálculo se disponíveis
+        calculo_vr_encontrado = False
+        for finding in context.get('findings', []):
+            if isinstance(finding, dict) and finding.get('action_type') == 'calculo_vale_refeicao':
+                if 'resultado_df' in finding and finding.get('success', False):
+                    # Usar resultado do cálculo de vale refeição
+                    resultado_df = finding['resultado_df']
+                    estatisticas = finding.get('estatisticas', {})
+                    
+                    export_data['CALCULO_VALE_REFEICAO'] = resultado_df
+                    total_records += len(resultado_df)
+                    calculo_vr_encontrado = True
+                    
+                    # Adicionar aba de estatísticas (incluindo por estado)
+                    estatisticas_df = pd.DataFrame([{
+                        'Métrica': 'Total de Colaboradores',
+                        'Valor': estatisticas.get('total_colaboradores', 0)
+                    }, {
+                        'Métrica': 'Colaboradores Elegíveis - Total',
+                        'Valor': estatisticas.get('total_elegiveis', 0)
+                    }, {
+                        'Métrica': 'Colaboradores Elegíveis - São Paulo (R$ 37,50)',
+                        'Valor': estatisticas.get('elegiveis_sp', 0)
+                    }, {
+                        'Métrica': 'Colaboradores Elegíveis - Outros Estados (R$ 35,00)',
+                        'Valor': estatisticas.get('elegiveis_outros', 0)
+                    }, {
+                        'Métrica': 'Colaboradores Excluídos',
+                        'Valor': estatisticas.get('total_excluidos', 0)
+                    }, {
+                        'Métrica': 'Valor Total Geral (R$)',
+                        'Valor': f"R$ {estatisticas.get('valor_total_geral', 0):,.2f}"
+                    }, {
+                        'Métrica': 'Valor Total - São Paulo (R$)',
+                        'Valor': f"R$ {estatisticas.get('valor_total_sp', 0):,.2f}"
+                    }, {
+                        'Métrica': 'Valor Total - Outros Estados (R$)',
+                        'Valor': f"R$ {estatisticas.get('valor_total_outros', 0):,.2f}"
+                    }, {
+                        'Métrica': 'Valor Médio por Elegível (R$)',
+                        'Valor': f"R$ {estatisticas.get('valor_medio_por_elegivel', 0):,.2f}"
+                    }, {
+                        'Métrica': 'Percentual de Elegíveis (%)',
+                        'Valor': f"{estatisticas.get('percentual_elegiveis', 0):.1f}%"
+                    }, {
+                        'Métrica': 'Percentual São Paulo (%)',
+                        'Valor': f"{estatisticas.get('percentual_sp', 0):.1f}%"
+                    }])
+                    
+                    export_data['ESTATISTICAS_VR'] = estatisticas_df
+                    
+                    # Adicionar aba no formato padrão solicitado
+                    formato_padrao_df = pd.DataFrame()
+                    
+                    # Filtrar apenas colaboradores elegíveis para o formato padrão
+                    elegiveis_df = resultado_df[resultado_df['STATUS'] == 'ELEGÍVEL'].copy()
+                    
+                    if not elegiveis_df.empty:
+                        # Criar DataFrame no formato padrão
+                        formato_padrao_data = []
+                        
+                        for _, row in elegiveis_df.iterrows():
+                            valor_diario = row['VALOR_DIARIO']
+                            total_vr = row['VALOR_TOTAL_VR']
+                            
+                            # Calcular custo empresa e desconto profissional (80% empresa, 20% funcionário)
+                            custo_empresa = total_vr * 0.80  # 80% empresa
+                            desconto_profissional = total_vr * 0.20  # 20% funcionário
+                            
+                            formato_padrao_data.append({
+                                'Admissão': '01/05/2024',  # Data padrão - pode ser ajustada
+                                'Sindicato do Colaborador': row['SINDICATO'],
+                                'Competência': '05/2025',  # Competência padrão - pode ser ajustada
+                                'Dias': 22.00,
+                                'VALOR DIÁRIO VR': valor_diario,
+                                'TOTAL': total_vr,
+                                'Custo empresa': custo_empresa,
+                                'Desconto profissional': desconto_profissional,
+                                'OBS GERAL': f"Matrícula: {row['MATRICULA']} - {row['NOME']} - Estado: {row['ESTADO']}"
+                            })
+                        
+                        formato_padrao_df = pd.DataFrame(formato_padrao_data)
+                        export_data['FORMATO_PADRAO_VR'] = formato_padrao_df
+                        
+                        st.session_state['agent_logs'].append({
+                            'timestamp': datetime.now().strftime('%H:%M:%S'),
+                            'agent': 'formato_padrao',
+                            'action': f'📋 Aba formato padrão criada com {len(formato_padrao_df)} registros',
+                            'details': {
+                                'registros_formato_padrao': len(formato_padrao_df),
+                                'custo_empresa_total': f"R$ {formato_padrao_df['Custo empresa'].sum():,.2f}",
+                                'desconto_total': f"R$ {formato_padrao_df['Desconto profissional'].sum():,.2f}"
+                            }
+                        })
+                    
+                    st.session_state['agent_logs'].append({
+                        'timestamp': datetime.now().strftime('%H:%M:%S'),
+                        'agent': 'excel_export',
+                        'action': '🎯 Usando resultados do cálculo de vale refeição para Excel',
+                        'details': {
+                            'registros_calculo': len(resultado_df),
+                            'elegiveis': estatisticas.get('total_elegiveis', 0),
+                            'valor_total': f"R$ {estatisticas.get('valor_total_geral', 0):,.2f}"
+                        }
+                    })
+                    break
+        
+        # Se não encontrou cálculo de VR, usar dados das tabelas normalmente
+        if not calculo_vr_encontrado:
+            for table in data_tables:  # Todas as tabelas sem limitação
+                try:
+                    # Buscar todos os dados da tabela (sem limitação para exportação completa)
+                    df = pd.read_sql(f'SELECT * FROM "{table}"', db.engine)
+                    export_data[table] = df
+                    total_records += len(df)
+                except Exception as e:
+                    # Se erro, criar DataFrame com informação do erro
+                    export_data[table] = pd.DataFrame({
+                        'Erro': [f'Não foi possível acessar dados: {str(e)}']
+                    })
+        
+        # Metadados da exportação
+        metadata = {
+            'Pergunta Original': context['question'],
+            'Iteração': iteration,
+            'Total de Tabelas': len(data_tables),
+            'Total de Registros': total_records,
+            'Gerado em': pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'Tipo': 'Análise Autônoma - Dados Completos'
+        }
+        
+        # Nome do arquivo baseado na pergunta
+        question_clean = context['question'][:30].replace(' ', '_').replace('?', '').replace('/', '_')
+        filename = f"analise_autonoma_{question_clean}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        
+        # Gerar Excel diretamente com pandas (mais simples e confiável)
+        try:
+            from io import BytesIO
+            excel_buffer = BytesIO()
+            
+            # Usar pandas ExcelWriter diretamente
+            with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
+                # Escrever cada tabela em uma aba
+                for table_name, df in export_data.items():
+                    if not df.empty:
+                        # Limpar nome da aba (máximo 31 caracteres, sem caracteres especiais)
+                        sheet_name = table_name[:31].replace('/', '_').replace('\\', '_').replace('?', '_')
+                        df.to_excel(writer, sheet_name=sheet_name, index=False)
+                
+                # Adicionar aba de metadados se disponível
+                if metadata:
+                    metadata_df = pd.DataFrame(list(metadata.items()), columns=['Campo', 'Valor'])
+                    metadata_df.to_excel(writer, sheet_name='Metadados', index=False)
+            
+            excel_buffer.seek(0)
+            
+        except Exception as e:
+            return {
+                "action_type": "excel_export_error",
+                "description": f"Erro ao gerar planilha Excel: {str(e)}",
+                "error": str(e),
+                "analysis_complete": False,
+                "findings": f"Falha na geração do Excel: {str(e)}"
+            }
+        
+        # Exibir botão de download diretamente
+        st.success("✅ Planilha Excel gerada com sucesso!")
+        
+        # Informações sobre o arquivo
+        st.info(f"📄 **Arquivo:** {filename}")
+        st.info(f"📊 **Conteúdo:** {len(export_data)} tabelas com {total_records} registros")
+        
+        # Verificar se o buffer tem dados
+        excel_data = excel_buffer.getvalue()
+        if len(excel_data) == 0:
+            st.error("❌ Arquivo Excel está vazio")
+            return {
+                "action_type": "excel_export_error",
+                "description": "Arquivo Excel vazio",
+                "error": "Buffer sem dados",
+                "analysis_complete": False,
+                "findings": "Excel gerado mas sem conteúdo"
+            }
+        
+        # Armazenar dados no session_state para evitar URLs intermediárias
+        excel_key = f"excel_data_{iteration}_{int(datetime.now().timestamp())}"
+        st.session_state[excel_key] = {
+            'data': excel_data,
+            'filename': filename,
+            'size': len(excel_data)
+        }
+        
+        # Mostrar informações e botão de download
+        st.success(f"✅ Arquivo Excel gerado com sucesso!")
+        st.info(f"📊 **Tamanho:** {len(excel_data):,} bytes")
+        st.info(f"📄 **Tabelas:** {len([k for k, v in export_data.items() if not v.empty])}")
+        st.info(f"📈 **Total de registros:** {total_records:,}")
+        
+        # SOLUÇÃO DEFINITIVA: Evitar st.download_button completamente
+        # Usar apenas método base64 que sempre funciona
+        st.markdown("### 📥 Download da Planilha Excel")
+        
+        import base64
+        b64 = base64.b64encode(excel_data).decode()
+        
+        # Informações do arquivo
+        st.success("✅ Planilha Excel gerada com sucesso!")
+        st.info(f"📄 **Nome:** {filename}")
+        st.info(f"📊 **Tamanho:** {len(excel_data):,} bytes")
+        st.info(f"📈 **Registros:** {total_records:,}")
+        
+        # Método base64 direto (sempre funciona, sem URLs /media/)
+        download_link = f"""
+        <div style="text-align: center; margin: 20px 0;">
+            <a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" 
+               download="{filename}" 
+               style="display: inline-block; 
+                      padding: 15px 30px; 
+                      background: linear-gradient(45deg, #1f77b4, #17a2b8);
+                      color: white; 
+                      text-decoration: none; 
+                      border-radius: 8px; 
+                      font-weight: bold;
+                      font-size: 16px;
+                      box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+                      transition: all 0.3s ease;">
+                📊 BAIXAR PLANILHA EXCEL
+            </a>
+        </div>
+        """
+        
+        st.markdown(download_link, unsafe_allow_html=True)
+        
+        # Instruções claras
+        st.markdown("""
+        ### 📋 Como Baixar:
+        1. **Clique no botão azul acima** - o download iniciará automaticamente
+        2. **Se não funcionar**: Clique com botão direito → "Salvar link como..."
+        3. **Escolha onde salvar** o arquivo Excel
+        4. **Abra o arquivo** no Excel, LibreOffice ou Google Sheets
+        """)
+        
+        # Informações técnicas (opcional)
+        with st.expander("🔧 Informações Técnicas", expanded=False):
+            st.markdown(f"""
+            **Detalhes do arquivo:**
+            - **Formato:** Excel (.xlsx)
+            - **Tamanho:** {len(excel_data):,} bytes
+            - **Tabelas incluídas:** {len([k for k, v in export_data.items() if not v.empty])}
+            - **Total de registros:** {total_records:,}
+            - **Método:** Base64 direto (sem URLs temporárias)
+            """)
+            
+            # Mostrar primeiros caracteres do base64 para debug
+            st.code(f"Base64 (primeiros 100 chars): {b64[:100]}...", language="text")
+        
+        # Aviso sobre compatibilidade
+        st.success("✅ **Este método funciona em todos os navegadores e não depende de URLs temporárias!**")
+        
+        success = True
+        
+        return {
+            "action_type": "excel_export",
+            "description": f"Planilha Excel gerada com dados de {len(data_tables)} tabelas",
+            "export_success": success,
+            "filename": filename,
+            "total_records": total_records,
+            "analysis_complete": False,  # NÃO marcar como completo - deixar o agente decidir
+            "findings": f"Dados exportados para Excel: {total_records} registros de {len(data_tables)} tabelas"
         }
         
     except Exception as e:
         return {
-            "action_type": "error",
-            "description": f"Erro na iteração {iteration}",
+            "action_type": "excel_export_error",
+            "description": f"Erro ao gerar planilha Excel",
             "error": str(e),
-            "analysis_complete": True
+            "analysis_complete": False,
+            "findings": f"Falha na exportação: {str(e)}"
         }
 
 def synthesize_final_results(llm, context: dict, config: dict) -> dict:
     """Sintetiza os resultados finais da análise"""
     
+    # Verificar se deve gerar Excel baseado nas ferramentas disponíveis
+    should_generate_excel = "excel_export" in config.get('available_tools', [])
+    
     synthesis_prompt = f"""
-    Sintetize os resultados da análise completa:
+    Sintetize os resultados da análise:
 
-    PERGUNTA ORIGINAL: {context['question']}
-    PLANO EXECUTADO: {context['plan']}
-    DESCOBERTAS: {context['findings']}
+    PERGUNTA: {context['question'][:100]}
+    DESCOBERTAS: {len(context.get('findings', []))} etapas executadas
 
-    Forneça:
-    1. Resposta direta à pergunta
-    2. Principais insights descobertos
-    3. Recomendações baseadas nos dados
-    4. Limitações da análise
-    5. Próximos passos sugeridos
-
-    Seja claro, objetivo e baseie-se apenas nos dados analisados.
+    Forneça resposta direta em 2-3 frases.
+    {"Mencione que foi gerada planilha Excel." if should_generate_excel else ""}
     """
     
     try:
         response = llm.complete(synthesis_prompt)
         
-        # Gerar insights estruturados
-        insights = [
-            "Análise dos dados concluída",
-            "Padrões identificados nos dados",
-            "Recomendações baseadas em evidências"
-        ]
-        
-        if config['include_insights']:
-            insights.extend([
-                "Oportunidades de melhoria identificadas",
-                "Áreas que requerem atenção especial"
-            ])
-        
-        return {
-            "final_answer": response.text,
-            "insights": insights,
-            "recommendations": [
-                "Continuar monitoramento dos dados",
-                "Implementar melhorias sugeridas",
-                "Realizar análises periódicas"
-            ],
-            "limitations": [
-                "Análise baseada em dados disponíveis",
-                "Resultados dependem da qualidade dos dados"
-            ]
-        }
+        # Se deve gerar Excel, retornar indicação
+        if should_generate_excel:
+            return {
+                "final_answer": response.text,
+                "insights": ["Análise concluída", "Dados exportados para Excel"],
+                "generate_excel": True,  # Sinalizar para gerar Excel
+                "recommendations": ["Verificar planilha Excel gerada"]
+            }
+        else:
+            return {
+                "final_answer": response.text,
+                "insights": ["Análise concluída"],
+                "recommendations": ["Revisar resultados obtidos"]
+            }
         
     except Exception as e:
         return {
@@ -1974,10 +3091,20 @@ def synthesize_final_results(llm, context: dict, config: dict) -> dict:
 def render_analysis_step(step: dict, show_reasoning: bool):
     """Renderiza uma etapa da análise"""
     
-    with st.expander(f"🔍 Etapa {step['step']}: {step['action']}", expanded=True):
+    # Usar container em vez de expander para evitar aninhamento
+    with st.container():
+        st.markdown(f"### 🔍 Etapa {step['step']}: {step['action']}")
         st.markdown(f"**Descrição:** {step['description']}")
         
         result = step['result']
+        
+        # Mostrar resposta direta primeiro se existir
+        if isinstance(result, dict) and 'direct_answer' in result:
+            st.success(f"✅ **Resposta:** {result['direct_answer']}")
+        
+        # Mostrar resultado numérico destacado para contagens
+        if isinstance(result, dict) and 'total_registros' in result:
+            st.metric("📊 Total de Registros", result['total_registros'])
         
         if show_reasoning and isinstance(result, dict):
             if 'plan' in result:
@@ -1995,11 +3122,43 @@ def render_analysis_step(step: dict, show_reasoning: bool):
                 st.code(result['sql_query'], language='sql')
                 
             if 'query_result' in result:
-                st.markdown("**📊 Resultado:**")
-                if isinstance(result['query_result'], list):
-                    st.json(result['query_result'])
+                st.markdown("**📊 Resultado da Consulta:**")
+                if isinstance(result['query_result'], list) and len(result['query_result']) <= 5:
+                    # Para resultados pequenos, mostrar de forma mais limpa
+                    for i, record in enumerate(result['query_result']):
+                        if isinstance(record, dict):
+                            for key, value in record.items():
+                                st.markdown(f"- **{key}:** {value}")
+                        else:
+                            st.write(f"Registro {i+1}: {record}")
+                elif isinstance(result['query_result'], list):
+                    # Para resultados grandes, usar checkbox para mostrar/ocultar
+                    if st.checkbox(f"Ver dados detalhados ({len(result['query_result'])} registros)", key=f"show_data_{step['step']}"):
+                        st.json(result['query_result'])
                 else:
                     st.write(result['query_result'])
+            
+            # Mostrar tabela alvo se especificada
+            if 'target_table' in result:
+                st.info(f"🎯 **Tabela analisada:** `{result['target_table']}`")
+            
+            # Mostrar raciocínio da IA se disponível
+            if 'ai_reasoning' in result and result['ai_reasoning']:
+                st.markdown("**🧠 Raciocínio da IA:**")
+                st.write(result['ai_reasoning'])
+            
+            # Mostrar erro de parse JSON se houver
+            if 'parse_error' in result:
+                st.warning(f"⚠️ **Aviso de Parse:** {result['parse_error']}")
+                
+                # Mostrar resposta bruta para debug
+                if st.checkbox(f"Ver resposta bruta da IA (Debug)", key=f"show_raw_{step['step']}"):
+                    if 'ai_reasoning' in result:
+                        st.code(result['ai_reasoning'], language="text")
+            
+            # Mostrar contagem de resultados se disponível
+            if 'result_count' in result:
+                st.metric("📊 Registros Retornados", result['result_count'])
             
             if 'ai_insights' in result:
                 st.markdown("**🧠 Insights da IA:**")
@@ -2013,6 +3172,17 @@ def render_analysis_step(step: dict, show_reasoning: bool):
                     st.markdown("**💡 Principais Insights:**")
                     for insight in result['insights']:
                         st.markdown(f"- {insight}")
+            
+            # Mostrar erros se existirem
+            if 'error' in result:
+                st.error(f"❌ **Erro:** {result['error']}")
+            
+            # Mostrar findings de forma destacada
+            if 'findings' in result and result['findings']:
+                st.markdown("**🔍 Descobertas:**")
+                st.info(result['findings'])
+        
+        st.markdown("---")  # Separador entre etapas
 
 def save_agent_analysis(question: str, steps: list, config: dict, iterations: int):
     """Salva análise do agente no histórico"""
