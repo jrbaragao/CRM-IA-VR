@@ -163,8 +163,9 @@ def _render_navigation_content() -> str:
     
     # Menu de navegação
     pages = {
-        'upload': '📤 Upload de Arquivos',
+        'upload': '📤 Upload de Dados',
         'processing': '🔄 Processamento',
+        'database': '🗃️ Banco de Dados',
         'calculations': '🧮 Cálculos VR',
         'reports': '📊 Relatórios',
         'prompts': '🎯 Gerenciar Prompts',

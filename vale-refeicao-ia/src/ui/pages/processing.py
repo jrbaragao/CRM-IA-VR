@@ -16,6 +16,7 @@ from ..components import (
 from ...agents.extraction_agent import ExtractionAgent
 from ...agents.log_utils import log_extraction_step
 from ...config.settings import settings
+from ...data.database import get_db_manager
 
 def render():
     """Renderiza página de processamento"""
@@ -76,8 +77,11 @@ def process_files():
     """Processa os arquivos carregados"""
     st.session_state['extraction_status'] = 'running'
     
-    # Inicializar agente de extração
+    # Inicializar agente de extração e banco de dados
     extraction_agent = ExtractionAgent()
+    db = get_db_manager()
+    
+    # Empresa padrão removida - usando apenas tabelas dinâmicas
     
     # Container para logs
     log_container = st.container()
@@ -135,24 +139,99 @@ def process_files():
                                       registros_válidos=len(df_processed))
                     st.empty()  # Força atualização
                     
-                    # Adicionar log do agente
+                    # 💾 CRIAR TABELA DINÂMICA NO BANCO
+                    log_extraction_step("💾 Criando tabela no banco de dados...")
+                    st.empty()
+                    
+                    try:
+                        # Nome da tabela baseado no arquivo
+                        table_name = file_info['name']
+                        
+                        # Detectar chave primária (MATRICULA se existir)
+                        primary_key = None
+                        for col in df_processed.columns:
+                            if 'MATRICULA' in col.upper():
+                                primary_key = col
+                                break
+                        
+                        log_extraction_step("🏗️ Criando estrutura da tabela...", 
+                                          tabela=table_name, 
+                                          chave_primaria=primary_key)
+                        st.empty()
+                        
+                        # Criar tabela dinamicamente
+                        table_created = db.create_table_from_dataframe(
+                            df_processed, 
+                            table_name, 
+                            primary_key
+                        )
+                        
+                        if table_created:
+                            # Salvar dados na tabela
+                            log_extraction_step("💾 Salvando dados na tabela...")
+                            st.empty()
+                            
+                            registros_salvos = db.save_dataframe_to_table(
+                                df_processed, 
+                                table_name, 
+                                if_exists='replace'
+                            )
+                            
+                            # Registrar importação
+                            importacao_id = db.log_importacao(
+                                nome_arquivo=file_info['name'],
+                                status="concluido",
+                                total_linhas=len(df_processed),
+                                linhas_processadas=registros_salvos
+                            )
+                            
+                            # Log do agente no banco
+                            db.log_agent_action(
+                                agent_name="extraction_agent",
+                                action="Tabela criada e dados salvos",
+                                input_data={
+                                    "file": file_info['name'], 
+                                    "rows": len(df_processed),
+                                    "columns": list(df_processed.columns)
+                                },
+                                output_data={
+                                    "table_name": table_name,
+                                    "registros_salvos": registros_salvos,
+                                    "primary_key": primary_key
+                                },
+                                status="success"
+                            )
+                            
+                            log_extraction_step("✅ Tabela criada e dados salvos!", 
+                                              tabela=table_name,
+                                              registros=registros_salvos)
+                        else:
+                            raise Exception("Falha ao criar tabela")
+                        
+                    except Exception as db_error:
+                        st.error(f"❌ Erro ao criar tabela: {str(db_error)}")
+                        log_extraction_step("❌ Erro ao criar tabela", erro=str(db_error))
+                    
+                    # Adicionar log do agente na sessão
                     log_entry = extraction_agent.log_action(
                         "Processamento concluído",
                         {
                             "file": file_info['name'],
                             "rows_processed": len(df_processed),
-                            "columns_mapped": len(df_processed.columns)
+                            "columns_mapped": len(df_processed.columns),
+                            "saved_to_db": True
                         }
                     )
                     st.session_state['agent_logs'].append(log_entry)
                     
-                    # Armazenar dados processados
+                    # Armazenar dados processados na sessão
                     processed_data[key] = {
                         'name': file_info['name'],
                         'data': df_processed,
                         'original_rows': file_info['rows'],
                         'processed_rows': len(df_processed),
-                        'processing_time': datetime.now()
+                        'processing_time': datetime.now(),
+                        'saved_to_db': True
                     }
                     
                     st.success(f"✅ Processamento concluído! {len(df_processed)} registros processados.")
@@ -185,11 +264,73 @@ def process_files():
     # Mostrar resumo
     st.success("✅ Processamento completo!")
     
+    # 📊 VERIFICAR TABELAS CRIADAS NO BANCO
+    st.divider()
+    st.subheader("📊 Tabelas Criadas no Banco de Dados")
+    
+    try:
+        # Listar todas as tabelas
+        tables = db.list_tables()
+        
+        if tables:
+            st.success(f"✅ {len(tables)} tabelas encontradas no banco de dados")
+            
+            # Mostrar informações de cada tabela
+            total_registros_banco = 0
+            
+            for table in tables:
+                # Pular tabelas do sistema
+                if table in ['importacoes', 'agent_logs', 'calculation_configs']:
+                    continue
+                
+                # Obter informações da tabela
+                table_info = db.get_table_info(table)
+                
+                if table_info:
+                    total_registros_banco += table_info['total_rows']
+                    
+                    with st.expander(f"📋 {table} ({table_info['total_rows']} registros)", expanded=False):
+                        # Informações da tabela
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.metric("Registros", table_info['total_rows'])
+                        
+                        with col2:
+                            st.metric("Colunas", len(table_info['columns']))
+                        
+                        # Mostrar estrutura da tabela
+                        st.markdown("**Estrutura da Tabela:**")
+                        columns_df = pd.DataFrame(table_info['columns'])
+                        st.dataframe(columns_df, use_container_width=True, hide_index=True)
+                        
+                        # Preview dos dados
+                        if st.button(f"👀 Ver Dados", key=f"preview_{table}"):
+                            df_table = db.get_table_data(table, limit=10)
+                            if not df_table.empty:
+                                st.markdown("**Preview dos Dados:**")
+                                st.dataframe(df_table, use_container_width=True)
+                            else:
+                                st.warning("Nenhum dado encontrado na tabela")
+            
+            # Salvar informações na sessão
+            st.session_state['db_tables'] = tables
+            st.session_state['total_registros_banco'] = total_registros_banco
+            
+        else:
+            st.warning("⚠️ Nenhuma tabela de dados encontrada no banco")
+            total_registros_banco = 0
+            
+    except Exception as e:
+        st.error(f"❌ Erro ao buscar tabelas do banco: {str(e)}")
+        total_registros_banco = 0
+    
     # Métricas finais
     metrics = [
         {'label': 'Arquivos Processados', 'value': len(processed_data)},
         {'label': 'Total de Registros', 'value': sum(d['processed_rows'] for d in processed_data.values())},
-        {'label': 'Funcionários Únicos', 'value': len(unified_data) if 'unified_data' in locals() else 0}
+        {'label': 'Tabelas Criadas', 'value': len([t for t in tables if t not in ['importacoes', 'agent_logs', 'calculation_configs']]) if 'tables' in locals() else 0},
+        {'label': 'Registros no Banco', 'value': total_registros_banco}
     ]
     render_metrics_row(metrics)
     

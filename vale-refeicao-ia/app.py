@@ -13,7 +13,7 @@ sys.path.append(str(Path(__file__).parent))
 
 from src.config.settings import Settings
 from src.ui.components import render_header, render_sidebar, render_realtime_logs
-from src.ui.pages import upload, processing, calculations, reports, prompts_manager, agent_monitor
+from src.ui.pages import upload, processing, calculations, reports, prompts_manager, agent_monitor, database_viewer
 
 # Configuração da página
 st.set_page_config(
@@ -136,6 +136,8 @@ def main():
             prompts_manager.render()
         elif page == 'monitor':
             agent_monitor.render()
+        elif page == 'database':
+            database_viewer.render()
     
     # Coluna da direita - Logs em tempo real
     with col_logs:

@@ -18,68 +18,46 @@ from ...config.settings import settings
 
 def render():
     """Renderiza página de upload"""
-    st.header("📤 Upload de Arquivos")
+    st.header("📤 Upload de Dados")
     st.markdown("""
-    Faça o upload das planilhas de RH que contêm as informações dos colaboradores.
-    O sistema identificará automaticamente as colunas e utilizará a **MATRICULA** como chave para unificar os dados.
+    Faça o upload das suas planilhas de dados. O sistema criará **tabelas dinâmicas** 
+    automaticamente e os **agentes autônomos** identificarão as correlações através 
+    dos prompts configurados.
     """)
     
+    # Informações sobre o novo sistema
+    with st.expander("ℹ️ Como funciona o novo sistema", expanded=False):
+        st.markdown("""
+        **🚀 Sistema Inteligente e Flexível:**
+        
+        **📊 Tabelas Dinâmicas:**
+        - Cada arquivo cria sua própria tabela no banco
+        - Estrutura adaptada automaticamente aos dados
+        - Sem necessidade de esquema pré-definido
+        
+        **🤖 Correlações Inteligentes:**
+        - Agentes autônomos identificam relações entre tabelas
+        - Prompts definem como correlacionar os dados
+        - Chaves de correlação definidas dinamicamente
+        
+        **🔄 Processo Simplificado:**
+        - Upload → Tabela Dinâmica → Configuração de Prompts → Análise Autônoma
+        """)
+    
     # Container para uploads
-    st.subheader("🗂️ Selecione os Arquivos")
+    st.subheader("📁 Selecione seus Arquivos de Dados")
     
-    # Tabs para diferentes tipos de arquivos
-    tab1, tab2, tab3 = st.tabs([
-        "📋 Dados Principais", 
-        "📊 Dados Complementares", 
-        "📁 Upload em Lote"
-    ])
+    uploaded_files = st.file_uploader(
+        "Faça upload dos seus arquivos de dados",
+        type=['csv', 'xlsx', 'xls'],
+        accept_multiple_files=True,
+        key="data_files_upload",
+        help="Cada arquivo será processado e criará uma tabela dinâmica no banco de dados"
+    )
     
-    with tab1:
-        st.markdown("""
-        Upload do arquivo principal com dados dos funcionários (cadastro, matrícula, nome, cargo, etc.)
-        """)
-        
-        main_file = render_upload_widget(
-            label="Arquivo principal de funcionários",
-            key="main_file_upload",
-            help_text="Arquivo deve conter no mínimo: MATRICULA, NOME, CARGO"
-        )
-        
-        if main_file:
-            # Processar arquivo principal
-            process_main_file(main_file)
-    
-    with tab2:
-        st.markdown("""
-        Upload de arquivos complementares (férias, faltas, benefícios, etc.)
-        """)
-        
-        # Permitir múltiplos arquivos complementares
-        comp_files = st.file_uploader(
-            "Arquivos complementares",
-            type=['csv', 'xlsx', 'xls'],
-            accept_multiple_files=True,
-            key="comp_files_upload",
-            help="Selecione um ou mais arquivos complementares"
-        )
-        
-        if comp_files:
-            process_complementary_files(comp_files)
-    
-    with tab3:
-        st.markdown("""
-        Upload de múltiplos arquivos de uma vez. Útil quando há muitas planilhas para processar.
-        """)
-        
-        batch_files = st.file_uploader(
-            "Selecione todos os arquivos",
-            type=['csv', 'xlsx', 'xls'],
-            accept_multiple_files=True,
-            key="batch_files_upload"
-        )
-        
-        if batch_files:
-            process_batch_files(batch_files)
+    if uploaded_files:
+        # Processar todos os arquivos
+        process_uploaded_files(uploaded_files)
     
     # Seção de arquivos carregados
     if st.session_state.get('uploaded_files'):
@@ -92,6 +70,46 @@ def render():
             if st.button("🚀 Processar Arquivos", type="primary", use_container_width=True):
                 st.session_state['current_page'] = 'processing'
                 st.rerun()
+
+def process_uploaded_files(files):
+    """Processa todos os arquivos enviados"""
+    try:
+        if 'uploaded_files' not in st.session_state:
+            st.session_state['uploaded_files'] = {}
+        
+        for i, file in enumerate(files):
+            # Ler arquivo
+            if file.name.endswith('.csv'):
+                df = pd.read_csv(file)
+            else:
+                df = pd.read_excel(file)
+            
+            # Validações básicas
+            if df.empty:
+                st.warning(f"⚠️ Arquivo '{file.name}' está vazio")
+                continue
+            
+            # Armazenar no session state
+            file_key = f"file_{i}_{file.name}"
+            st.session_state['uploaded_files'][file_key] = {
+                'name': file.name,
+                'data': df,
+                'type': 'data',  # Todos são dados agora
+                'uploaded_at': datetime.now(),
+                'rows': len(df),
+                'columns': len(df.columns)
+            }
+        
+        st.success(f"✅ {len(files)} arquivo(s) carregado(s) com sucesso!")
+        
+        # Preview dos arquivos
+        for file_key, file_info in st.session_state['uploaded_files'].items():
+            if file_key.startswith('file_'):
+                with st.expander(f"📊 {file_info['name']} ({file_info['rows']} linhas, {file_info['columns']} colunas)", expanded=False):
+                    st.dataframe(file_info['data'].head(), use_container_width=True)
+        
+    except Exception as e:
+        st.error(f"❌ Erro ao processar arquivos: {str(e)}")
 
 def process_main_file(file):
     """Processa arquivo principal"""
@@ -244,15 +262,14 @@ def display_uploaded_files():
     
     files_data = []
     total_rows = 0
-    total_size = 0
     
     for key, file_info in st.session_state['uploaded_files'].items():
         files_data.append({
             'Nome': file_info['name'],
-            'Tipo': 'Principal' if file_info['type'] == 'main' else 'Complementar',
+            'Tipo': 'Dados',  # Todos são dados agora
             'Linhas': f"{file_info['rows']:,}",
             'Colunas': file_info['columns'],
-            'Upload': file_info['upload_time'].strftime('%H:%M:%S')
+            'Upload': file_info.get('uploaded_at', file_info.get('upload_time', datetime.now())).strftime('%H:%M:%S')
         })
         total_rows += file_info['rows']
     
@@ -264,7 +281,7 @@ def display_uploaded_files():
     metrics = [
         {'label': 'Total de Arquivos', 'value': len(files_data)},
         {'label': 'Total de Registros', 'value': f"{total_rows:,}"},
-        {'label': 'Arquivo Principal', 'value': '✅' if any(f['Tipo'] == 'Principal' for f in files_data) else '❌'}
+        {'label': 'Tabelas a Criar', 'value': len(files_data)}
     ]
     
     render_metrics_row(metrics)
@@ -273,7 +290,7 @@ def display_uploaded_files():
     with st.expander("🗑️ Gerenciar Arquivos"):
         files_to_remove = st.multiselect(
             "Selecione arquivos para remover:",
-            options=[f['name'] for f in st.session_state['uploaded_files'].values()]
+            options=[file_info['name'] for file_info in st.session_state['uploaded_files'].values()]
         )
         
         if files_to_remove and st.button("Remover Selecionados", type="secondary"):
