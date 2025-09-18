@@ -1,8 +1,8 @@
 # 🤖 Sistema Inteligente de Análise de Dados com Agentes Autônomos
 
-Sistema revolucionário de análise de dados baseado em **Agentes de IA Autônomos** e **Tabelas Dinâmicas**. Processe qualquer tipo de dados, configure prompts personalizados e deixe os agentes executarem análises complexas automaticamente.
+Sistema de análise e prcessamento de dados baseado em **Agentes de IA Autônomos** e **Tabelas Dinâmicas**. Processa qualquer tipo de dados, com prompts personalizados e  agentes que executam análises complexas automaticamente.
 
-## 🌟 Funcionalidades Revolucionárias
+## 🌟 Funcionalidades
 
 ### 🧠 **Agentes de IA Autônomos**
 - **🔍 Agente de Consulta**: Converte linguagem natural em SQL inteligente
