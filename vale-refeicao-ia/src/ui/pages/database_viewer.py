@@ -3220,3 +3220,5 @@ def save_agent_analysis(question: str, steps: list, config: dict, iterations: in
     # Manter apenas as Ãºltimas 10 anÃ¡lises
     if len(st.session_state['agent_analyses']) > 10:
         st.session_state['agent_analyses'] = st.session_state['agent_analyses'][-10:]
+
+# Atualização forçada 09/18/2025 20:54:55

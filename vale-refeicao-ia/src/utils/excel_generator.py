@@ -438,3 +438,5 @@ def execute_excel_export_tool(data: Any,
         else:
             st.error(f"âŒ Erro ao gerar Excel: {str(e)}")
         return False
+
+# Atualização forçada 09/18/2025 20:55:06
