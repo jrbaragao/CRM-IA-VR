@@ -527,7 +527,7 @@ Agente:
 4. ⚡ Executa e apresenta resultados
 ```
 
-### 🧮 **Cálculo Autônomo**
+### 🧮 **Cálculo Autônomo** 
 ```
 Prompt: "Atue como especialista de RH e calculista de vale refeições no Brasil.
 A tabela ativos indica colaboradores e se relaciona com as demais pela MATRICULA.
