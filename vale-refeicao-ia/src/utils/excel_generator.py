@@ -82,11 +82,22 @@ class ExcelGenerator:
             # Limpar nome da aba
             clean_name = self._clean_sheet_name(sheet_name)
             
-            # Escrever dados
-            df.to_excel(writer, sheet_name=clean_name, index=False)
-            
-            # Formatar planilha
-            self._format_worksheet(writer, clean_name, df)
+            # Tratamento especial para FORMATO_PADRAO_VR
+            if sheet_name == 'FORMATO_PADRAO_VR' and 'TOTAL' in df.columns:
+                # Calcular soma total da coluna TOTAL
+                soma_total = df['TOTAL'].sum()
+                
+                # Escrever dados originais sem cabeçalhos (a formatação vai adicionar tudo)
+                df.to_excel(writer, sheet_name=clean_name, index=False, header=False, startrow=3)
+                
+                # Formatar planilha com formatação especial (adiciona total e cabeçalhos)
+                self._format_worksheet_with_total(writer, clean_name, df, soma_total)
+            else:
+                # Escrever dados normalmente
+                df.to_excel(writer, sheet_name=clean_name, index=False)
+                
+                # Formatar planilha
+                self._format_worksheet(writer, clean_name, df)
     
     def _add_metadata_sheet(self, writer, metadata: Dict[str, Any], filename: str):
         """Adiciona aba com metadados"""
@@ -142,9 +153,27 @@ class ExcelGenerator:
                 'border': 1
             })
             
+            # Formato para valores monetários (padrão brasileiro)
+            money_format = workbook.add_format({
+                'num_format': '#.##0,00'  # Formato brasileiro: ponto para milhares, vírgula para decimais
+            })
+            
             # Formatar cabeçalhos
             for col_num, value in enumerate(df.columns.values):
                 worksheet.write(0, col_num, value, header_format)
+            
+            # Formatar dados com formato monetário quando aplicável
+            for row_idx in range(len(df)):
+                for col_idx, col in enumerate(df.columns):
+                    value = df.iloc[row_idx, col_idx]
+                    # Aplicar formato monetário para colunas de valores
+                    if col in ['TOTAL', 'Custo empresa', 'Desconto profissional', 'VALOR DIÁRIO VR', 'VALOR_TOTAL_VR', 'VALOR_DIARIO', 'DESCONTO_FUNCIONARIO', 'VALOR_LIQUIDO_EMPRESA']:
+                        if pd.notna(value) and isinstance(value, (int, float)):
+                            worksheet.write(row_idx + 1, col_idx, value, money_format)
+                        else:
+                            worksheet.write(row_idx + 1, col_idx, value)
+                    else:
+                        worksheet.write(row_idx + 1, col_idx, value)
             
             # Auto-ajustar largura das colunas
             for i, col in enumerate(df.columns):
@@ -158,6 +187,80 @@ class ExcelGenerator:
                 max_length = min(max_length + 2, 50)
                 worksheet.set_column(i, i, max_length)
                 
+        except Exception as e:
+            # Se formatação falhar, continua sem formatação
+            pass
+    
+    def _format_worksheet_with_total(self, writer, sheet_name: str, df: pd.DataFrame, soma_total: float):
+        """Aplica formatação especial para planilha com linha de totalização"""
+        
+        try:
+            workbook = writer.book
+            worksheet = writer.sheets[sheet_name]
+            
+            # Formatos
+            header_format = workbook.add_format({
+                'bold': True,
+                'text_wrap': True,
+                'valign': 'top',
+                'fg_color': '#D7E4BC',
+                'border': 1
+            })
+            
+            # Formato para linha de total (padrão brasileiro)
+            total_format = workbook.add_format({
+                'bold': True,
+                'num_format': '#.##0,00',  # Formato brasileiro: ponto para milhares, vírgula para decimais
+                'fg_color': '#FFE699',
+                'border': 2,
+                'font_size': 12
+            })
+            
+            # Formato para valores monetários (padrão brasileiro)
+            money_format = workbook.add_format({
+                'num_format': '#.##0,00'  # Formato brasileiro: ponto para milhares, vírgula para decimais
+            })
+            
+            # Formatar primeira linha (total) - linha 0
+            for col_idx, col in enumerate(df.columns):
+                if col == 'TOTAL':
+                    worksheet.write(0, col_idx, soma_total, total_format)
+                else:
+                    worksheet.write_string(0, col_idx, '', workbook.add_format({'border': 0}))
+            
+            # Linha vazia (linha 1) - já está vazia
+            
+            # Formatar cabeçalhos (linha 2)
+            for col_num, value in enumerate(df.columns.values):
+                worksheet.write(2, col_num, value, header_format)
+            
+            # Formatar dados (a partir da linha 3) - os dados já foram escritos a partir da linha 3
+            for row_idx in range(len(df)):
+                for col_idx, col in enumerate(df.columns):
+                    value = df.iloc[row_idx, col_idx]
+                    if col in ['TOTAL', 'Custo empresa', 'Desconto profissional', 'VALOR DIÁRIO VR']:
+                        if pd.notna(value) and isinstance(value, (int, float)):
+                            worksheet.write(row_idx + 3, col_idx, value, money_format)
+                        else:
+                            worksheet.write(row_idx + 3, col_idx, value)
+                    else:
+                        worksheet.write(row_idx + 3, col_idx, value)
+            
+            # Auto-ajustar largura das colunas
+            for i, col in enumerate(df.columns):
+                if col == 'OBS GERAL':
+                    worksheet.set_column(i, i, 60)  # Coluna OBS GERAL mais larga
+                elif col == 'Sindicato do Colaborador':
+                    worksheet.set_column(i, i, 30)  # Coluna Sindicato média
+                else:
+                    # Calcular largura baseada no conteúdo
+                    max_length = max(
+                        df[col].astype(str).map(len).max(),  # Maior valor na coluna
+                        len(str(col))  # Nome da coluna
+                    )
+                    max_length = min(max_length + 2, 20)
+                    worksheet.set_column(i, i, max_length)
+                    
         except Exception as e:
             # Se formatação falhar, continua sem formatação
             pass

@@ -1751,8 +1751,14 @@ Crie um plano estruturado em JSON com as chaves:
             with steps_container:
                 render_analysis_step(analysis_steps[-1], config['show_reasoning'])
                 
-                # Se deve gerar Excel, executar agora
-                if final_synthesis.get('generate_excel', False):
+                # Se deve gerar Excel, executar agora - MAS apenas se ainda não foi gerado
+                excel_already_generated = any(
+                    step.get('result', {}).get('excel_generated', False) or 
+                    step.get('action', '') == 'Exportação Excel'
+                    for step in analysis_steps
+                )
+                
+                if final_synthesis.get('generate_excel', False) and not excel_already_generated:
                     st.markdown("### 📊 Gerando Planilha Excel...")
                     excel_result = execute_excel_export_action(db, data_tables, current_context, len(analysis_steps))
                     
@@ -2483,6 +2489,51 @@ def calculo_vale_refeicao_tool(db, data_tables: list) -> dict:
             'details': {'total_ativos': total_ativos}
         })
         
+        # 1.1. BUSCAR COLABORADORES DE ADMISSÃO ABRIL (SE EXISTIR)
+        admissao_abril_df = pd.DataFrame()
+        total_admissao_abril = 0
+        
+        if 'admissao_abril' in data_tables:
+            admissao_abril_df = pd.read_sql('SELECT * FROM "admissao_abril"', db.engine)
+            
+            # Filtrar apenas colaboradores que NÃO estão na tabela ativos
+            if not admissao_abril_df.empty and 'MATRICULA' in admissao_abril_df.columns:
+                matriculas_ativos = set(ativos_df['MATRICULA'].astype(str))
+                admissao_abril_df['MATRICULA'] = admissao_abril_df['MATRICULA'].astype(str)
+                
+                # Filtrar apenas os que não estão em ativos
+                mask_novos = ~admissao_abril_df['MATRICULA'].isin(matriculas_ativos)
+                admissao_abril_df = admissao_abril_df[mask_novos]
+                total_admissao_abril = len(admissao_abril_df)
+                
+                if total_admissao_abril > 0:
+                    # Unir com colaboradores ativos
+                    ativos_df = pd.concat([ativos_df, admissao_abril_df], ignore_index=True)
+                    
+                    st.session_state['agent_logs'].append({
+                        'timestamp': datetime.now().strftime('%H:%M:%S'),
+                        'agent': 'calculo_vale_refeicao',
+                        'action': f'➕ Adicionados {total_admissao_abril} colaboradores de admissão abril',
+                        'details': {
+                            'total_admissao_abril': total_admissao_abril,
+                            'total_combinado': len(ativos_df)
+                        }
+                    })
+        
+        # Atualizar total após possível inclusão de admissão abril
+        total_final = len(ativos_df)
+        
+        st.session_state['agent_logs'].append({
+            'timestamp': datetime.now().strftime('%H:%M:%S'),
+            'agent': 'calculo_vale_refeicao',
+            'action': f'📋 Total final para processamento: {total_final} colaboradores',
+            'details': {
+                'ativos_originais': total_ativos,
+                'admissao_abril_novos': total_admissao_abril,
+                'total_final': total_final
+            }
+        })
+        
         # 2. BUSCAR TABELAS DE EXCLUSÃO
         exclusoes = {}
         tabelas_exclusao = ['ferias', 'afastamentos', 'aprendiz', 'exterior', 'desligados']
@@ -2608,7 +2659,7 @@ def calculo_vale_refeicao_tool(db, data_tables: list) -> dict:
             'timestamp': datetime.now().strftime('%H:%M:%S'),
             'agent': 'calculo_vale_refeicao',
             'action': '🔄 Iniciando loop de cálculo por colaborador',
-            'details': {'total_para_processar': total_ativos}
+            'details': {'total_para_processar': total_final}
         })
         
         for index, colaborador in ativos_df.iterrows():
@@ -2840,11 +2891,11 @@ def execute_excel_export_action(db, data_tables: list, context: dict, iteration:
                                 'Admissão': '01/05/2024',  # Data padrão - pode ser ajustada
                                 'Sindicato do Colaborador': row['SINDICATO'],
                                 'Competência': '05/2025',  # Competência padrão - pode ser ajustada
-                                'Dias': 22.00,
-                                'VALOR DIÁRIO VR': valor_diario,
-                                'TOTAL': total_vr,
-                                'Custo empresa': custo_empresa,
-                                'Desconto profissional': desconto_profissional,
+                                'Dias': float(22.00),
+                                'VALOR DIÁRIO VR': float(valor_diario),
+                                'TOTAL': float(total_vr),
+                                'Custo empresa': float(custo_empresa),
+                                'Desconto profissional': float(desconto_profissional),
                                 'OBS GERAL': f"Matrícula: {row['MATRICULA']} - {row['NOME']} - Estado: {row['ESTADO']}"
                             })
                         
@@ -2898,30 +2949,45 @@ def execute_excel_export_action(db, data_tables: list, context: dict, iteration:
             'Tipo': 'Análise Autônoma - Dados Completos'
         }
         
-        # Nome do arquivo baseado na pergunta
-        question_clean = context['question'][:30].replace(' ', '_').replace('?', '').replace('/', '_')
+        # Nome do arquivo baseado na pergunta - extrair apenas o objetivo real
+        question_text = context.get('question', 'analise')
+        
+        # Se o texto começa com "CONTEXTO:", extrair apenas o OBJETIVO
+        if "OBJETIVO:" in question_text:
+            # Pegar o texto após "OBJETIVO:" até a próxima quebra de linha ou limite
+            objetivo_start = question_text.find("OBJETIVO:") + len("OBJETIVO:")
+            objetivo_end = question_text.find("\n", objetivo_start)
+            if objetivo_end == -1:
+                objetivo_end = objetivo_start + 50
+            question_clean = question_text[objetivo_start:objetivo_end].strip()[:30]
+        else:
+            # Caso contrário, usar os primeiros 30 caracteres
+            question_clean = question_text[:30]
+        
+        # Limpar caracteres especiais
+        question_clean = question_clean.replace(' ', '_').replace('?', '').replace('/', '_').replace(':', '').replace('\n', '')
+        
+        # Se ficou vazio ou muito pequeno, usar nome padrão
+        if len(question_clean) < 5:
+            question_clean = "calculo_vale_refeicao"
+            
         filename = f"analise_autonoma_{question_clean}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
         
-        # Gerar Excel diretamente com pandas (mais simples e confiável)
+        # Usar o ExcelGenerator com as formatações implementadas
         try:
-            from io import BytesIO
-            excel_buffer = BytesIO()
+            from ...utils.excel_generator import ExcelGenerator
             
-            # Usar pandas ExcelWriter diretamente
-            with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
-                # Escrever cada tabela em uma aba
-                for table_name, df in export_data.items():
-                    if not df.empty:
-                        # Limpar nome da aba (máximo 31 caracteres, sem caracteres especiais)
-                        sheet_name = table_name[:31].replace('/', '_').replace('\\', '_').replace('?', '_')
-                        df.to_excel(writer, sheet_name=sheet_name, index=False)
-                
-                # Adicionar aba de metadados se disponível
-                if metadata:
-                    metadata_df = pd.DataFrame(list(metadata.items()), columns=['Campo', 'Valor'])
-                    metadata_df.to_excel(writer, sheet_name='Metadados', index=False)
+            generator = ExcelGenerator()
+            excel_buffer = generator.create_excel_from_data(export_data, filename, metadata)
             
-            excel_buffer.seek(0)
+            if excel_buffer is None:
+                return {
+                    "action_type": "excel_export_error",
+                    "description": "Erro ao gerar planilha Excel",
+                    "error": "ExcelGenerator retornou None",
+                    "analysis_complete": False,
+                    "findings": "Falha na geração do Excel"
+                }
             
         except Exception as e:
             return {
@@ -2931,13 +2997,6 @@ def execute_excel_export_action(db, data_tables: list, context: dict, iteration:
                 "analysis_complete": False,
                 "findings": f"Falha na geração do Excel: {str(e)}"
             }
-        
-        # Exibir botão de download diretamente
-        st.success("✅ Planilha Excel gerada com sucesso!")
-        
-        # Informações sobre o arquivo
-        st.info(f"📄 **Arquivo:** {filename}")
-        st.info(f"📊 **Conteúdo:** {len(export_data)} tabelas com {total_records} registros")
         
         # Verificar se o buffer tem dados
         excel_data = excel_buffer.getvalue()
@@ -2959,72 +3018,29 @@ def execute_excel_export_action(db, data_tables: list, context: dict, iteration:
             'size': len(excel_data)
         }
         
-        # Mostrar informações e botão de download
-        st.success(f"✅ Arquivo Excel gerado com sucesso!")
-        st.info(f"📊 **Tamanho:** {len(excel_data):,} bytes")
-        st.info(f"📄 **Tabelas:** {len([k for k, v in export_data.items() if not v.empty])}")
-        st.info(f"📈 **Total de registros:** {total_records:,}")
-        
-        # SOLUÇÃO DEFINITIVA: Evitar st.download_button completamente
-        # Usar apenas método base64 que sempre funciona
+        # SOLUÇÃO DEFINITIVA: Mostrar informações apenas uma vez
         st.markdown("### 📥 Download da Planilha Excel")
         
-        import base64
-        b64 = base64.b64encode(excel_data).decode()
-        
-        # Informações do arquivo
+        # Exibir informações do arquivo uma única vez
         st.success("✅ Planilha Excel gerada com sucesso!")
-        st.info(f"📄 **Nome:** {filename}")
-        st.info(f"📊 **Tamanho:** {len(excel_data):,} bytes")
-        st.info(f"📈 **Registros:** {total_records:,}")
         
-        # Método base64 direto (sempre funciona, sem URLs /media/)
-        download_link = f"""
-        <div style="text-align: center; margin: 20px 0;">
-            <a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" 
-               download="{filename}" 
-               style="display: inline-block; 
-                      padding: 15px 30px; 
-                      background: linear-gradient(45deg, #1f77b4, #17a2b8);
-                      color: white; 
-                      text-decoration: none; 
-                      border-radius: 8px; 
-                      font-weight: bold;
-                      font-size: 16px;
-                      box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-                      transition: all 0.3s ease;">
-                📊 BAIXAR PLANILHA EXCEL
-            </a>
-        </div>
-        """
+        col1, col2 = st.columns(2)
+        with col1:
+            st.info(f"📄 **Nome:** {filename}")
+            st.info(f"📊 **Tabelas:** {len([k for k, v in export_data.items() if not v.empty])}")
+        with col2:
+            st.info(f"📊 **Tamanho:** {len(excel_data):,} bytes")
+            st.info(f"📈 **Total de registros:** {total_records:,}")
         
-        st.markdown(download_link, unsafe_allow_html=True)
+        # Usar st.download_button padrão do Streamlit (mais confiável, evita duplicação)
+        st.download_button(
+            label=f"📥 Baixar Planilha Excel ({len(excel_data)/1024:.1f} KB)",
+            data=excel_data,
+            file_name=filename,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key=f"excel_download_{iteration}_{int(datetime.now().timestamp())}"
+        )
         
-        # Instruções claras
-        st.markdown("""
-        ### 📋 Como Baixar:
-        1. **Clique no botão azul acima** - o download iniciará automaticamente
-        2. **Se não funcionar**: Clique com botão direito → "Salvar link como..."
-        3. **Escolha onde salvar** o arquivo Excel
-        4. **Abra o arquivo** no Excel, LibreOffice ou Google Sheets
-        """)
-        
-        # Informações técnicas (opcional)
-        with st.expander("🔧 Informações Técnicas", expanded=False):
-            st.markdown(f"""
-            **Detalhes do arquivo:**
-            - **Formato:** Excel (.xlsx)
-            - **Tamanho:** {len(excel_data):,} bytes
-            - **Tabelas incluídas:** {len([k for k, v in export_data.items() if not v.empty])}
-            - **Total de registros:** {total_records:,}
-            - **Método:** Base64 direto (sem URLs temporárias)
-            """)
-            
-            # Mostrar primeiros caracteres do base64 para debug
-            st.code(f"Base64 (primeiros 100 chars): {b64[:100]}...", language="text")
-        
-        # Aviso sobre compatibilidade
-        st.success("✅ **Este método funciona em todos os navegadores e não depende de URLs temporárias!**")
         
         success = True
         

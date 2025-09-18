@@ -7,7 +7,7 @@ Sistema revolucionário de análise de dados baseado em **Agentes de IA Autônom
 ### 🧠 **Agentes de IA Autônomos**
 - **🔍 Agente de Consulta**: Converte linguagem natural em SQL inteligente
 - **🧮 Agente de Cálculo**: Executa cálculos complexos baseados em prompts configuráveis
-- **💰 Tool Vale Refeição**: Cálculo especializado com regras de negócio brasileiras
+- **💰 Tool Vale Refeição**: Cálculo especializado com regras de negócio brasileiras (detalhado abaixo)
 - **📊 Agente de Análise**: Realiza análises multi-etapas com raciocínio transparente
 - **🔄 Processo Iterativo**: Agentes executam múltiplas etapas até completar objetivos
 
@@ -201,6 +201,10 @@ vale-refeicao-ia/
 │   ├── MATRICULA           # Chave primária
 │   ├── NOME                # Nome do colaborador  
 │   └── SINDICATO           # Sindicato (detecta SP automaticamente)
+├── admissao_abril.xlsx     # Funcionários contratados em abril (NOVO!)
+│   ├── MATRICULA           # Chave primária (validação anti-duplicata)
+│   ├── NOME                # Nome do contratado
+│   └── SINDICATO           # Sindicato para cálculo de valor
 ├── ferias.xlsx             # Colaboradores de férias
 ├── afastamentos.xlsx       # Colaboradores afastados
 ├── aprendiz.xlsx           # Aprendizes (excluídos)
@@ -209,10 +213,18 @@ vale-refeicao-ia/
 └── base_sindicato_x_valor.xlsx  # Valores por sindicato (opcional)
 ```
 
-### 🧮 **Lógica de Cálculo**
+### 🧮 **Lógica de Cálculo Atualizada**
 ```python
 # 1. Carrega colaboradores ativos
 ativos = carregar_tabela("ativos")
+
+# 1.1. Adiciona funcionários contratados (se existir tabela)
+if tabela_existe("admissao_abril"):
+    contratados_abril = carregar_tabela("admissao_abril")
+    # Filtra apenas os que NÃO estão em ativos (evita duplicação)
+    novos_contratados = contratados_abril[~contratados_abril.MATRICULA.isin(ativos.MATRICULA)]
+    # Combina as listas
+    ativos = combinar(ativos, novos_contratados)
 
 # 2. Identifica exclusões
 exclusoes = {
@@ -264,6 +276,243 @@ for colaborador in ativos:
    ├── Custo empresa (80%), Desconto profissional (20%)
    └── OBS GERAL (matrícula, nome, estado)
 ```
+
+## 💰 Ferramenta "Cálculo de Vale Refeição" - Análise Detalhada
+
+### 🎯 **Objetivo Principal**
+A ferramenta "Cálculo de Vale Refeição" é um **agente especializado** que automatiza completamente o processo de cálculo de benefícios alimentação seguindo as **regras brasileiras de RH**, eliminando trabalho manual e garantindo precisão total.
+
+### 🔧 **Funcionalidades Principais**
+
+#### 1. **🔍 Análise Automática de Elegibilidade**
+- **Carrega colaboradores ativos** da tabela principal
+- **➕ Inclui funcionários contratados** da tabela `admissao_abril` que não estejam em `ativos`
+- **🚫 Evita duplicações** através de validação cruzada por MATRÍCULA
+- **Identifica exclusões automáticas** através de múltiplas tabelas:
+  - ❌ Colaboradores de férias
+  - ❌ Afastamentos médicos/licenças
+  - ❌ Aprendizes (não elegíveis)
+  - ❌ Funcionários no exterior
+  - ❌ Desligados do quadro
+- **Aplica regras de negócio** específicas do RH brasileiro
+
+#### 2. **💰 Cálculo Inteligente por Estado**
+- **São Paulo**: R$ 37,50/dia (detecção automática via campo SINDICATO)
+- **Outros Estados**: R$ 35,00/dia
+- **Valores customizáveis** via tabela `base_sindicato_x_valor.xlsx`
+- **22 dias úteis padrão** (configurável)
+
+#### 3. **📊 Geração de Relatórios Completos**
+A ferramenta gera **automaticamente** 3 abas Excel:
+
+**📋 Aba "CALCULO_VALE_REFEICAO":**
+- Lista completa com todos os colaboradores
+- Status de elegibilidade individual
+- Motivos de exclusão detalhados
+- Valores calculados por pessoa
+
+**📊 Aba "ESTATISTICAS_VR":**
+- Totalizadores gerais e por estado
+- Percentuais de elegibilidade
+- Médias e análises estatísticas
+- Resumo executivo para gestão
+
+**📄 Aba "FORMATO_PADRAO_VR":**
+- Layout padrão para folha de pagamento
+- Divisão de custos (80% empresa / 20% funcionário)
+- Campos prontos para importação em sistemas
+
+#### 4. **🧠 Inteligência Artificial Integrada**
+- **Detecção automática** de padrões nos dados
+- **Sugestões inteligentes** para correções
+- **Validação cruzada** entre tabelas
+- **Logs detalhados** de todo o processo
+
+#### 5. **⚡ Performance e Escalabilidade**
+- Processa **milhares de registros** em segundos
+- **Otimizações SQL** para grandes volumes
+- **Cache inteligente** para execuções repetidas
+- **Exportação automática** sem intervenção manual
+
+### 🎮 **Como Usar**
+
+1. **📤 Upload dos Arquivos**:
+   - `ativos.xlsx` - Lista de colaboradores principais
+   - `admissao_abril.xlsx` - Funcionários contratados em abril (opcional)
+   - `ferias.xlsx`, `afastamentos.xlsx`, etc. - Exclusões
+
+2. **🔄 Processamento Inteligente**:
+   - Sistema carrega colaboradores ativos
+   - **Adiciona automaticamente** funcionários de `admissao_abril` que não estejam em `ativos`
+   - **Valida e remove duplicatas** por MATRÍCULA
+   - Logs detalhados de todo o processo
+
+3. **🚀 Execução Automática**:
+   - Selecione a configuração "Vale Refeição Padrão"
+   - Clique em "Iniciar Cálculo Autônomo"
+   - Aguarde o processamento (30-60 segundos)
+
+4. **📊 Resultados**:
+   - Excel completo gerado automaticamente
+   - Disponível na aba "Exportações"
+   - Logs detalhados do processo com contadores por origem
+
+### 💡 **Vantagens Competitivas**
+
+- **🕐 Economia de Tempo**: Processo que levava horas agora leva minutos
+- **🎯 Precisão Total**: Elimina erros humanos de cálculo
+- **📋 Conformidade**: Segue rigorosamente a legislação brasileira
+- **🔄 Reutilizável**: Configurações salvas para uso mensal
+- **📊 Transparência**: Logs completos de todas as decisões
+- **🔧 Customizável**: Regras adaptáveis para diferentes empresas
+
+## 🧠 Uso de Agentes de IA na Aplicação
+
+### 🎯 **Onde a IA é Utilizada**
+
+A aplicação utiliza **Inteligência Artificial (OpenAI GPT)** em **duas camadas principais**:
+
+#### **1. 🧮 Agente de Cálculo Autônomo (Orquestração IA)**
+**Localização:** `src/ui/pages/calculations.py` → `execute_autonomous_calculation()`
+
+```python
+# O usuário define um prompt em linguagem natural:
+calculation_prompt = f"""
+CONTEXTO: Você é um agente especializado em cálculos de benefícios e análises de RH.
+
+OBJETIVO: {config['prompt']}  # Ex: "Calcule vale refeição para todos os funcionários ativos"
+
+FERRAMENTAS DISPONÍVEIS: {', '.join(config['available_tools'])}
+
+INSTRUÇÕES:
+1. Analise os dados disponíveis nas tabelas
+2. Aplique as regras de cálculo especificadas
+3. Gere resultados detalhados e organizados
+4. Forneça relatórios com totais e estatísticas
+
+Execute o cálculo de forma autônoma.
+"""
+```
+
+**🤖 Como a IA funciona aqui:**
+- **Recebe prompt** em linguagem natural do usuário
+- **Analisa tabelas** disponíveis no banco de dados
+- **Cria um plano** de execução estruturado
+- **Executa iterações** até completar o objetivo
+- **Decide quais ferramentas** usar em cada etapa
+- **Chama a tool específica** (ex: `calculo_vale_refeicao_tool`)
+
+#### **2. 🔄 Agente Autônomo Multi-Iterativo (Decisão IA)**
+**Localização:** `src/ui/pages/database_viewer.py` → `execute_autonomous_agent()`
+
+```python
+# IA configurada com OpenAI GPT
+llm = OpenAI(
+    api_key=settings.openai_api_key,
+    model=settings.openai_model,  # Ex: gpt-4
+    temperature=0.3,
+    request_timeout=60.0,
+    max_retries=3
+)
+
+# IA decide a próxima ação baseada no contexto
+action_prompt = f"""
+OBJETIVO: {objective}
+TABELAS: {tables_available}
+PASSO ATUAL: {current_step}
+
+Responda APENAS JSON:
+{{
+"action_type": "sql_query" | "calculo_vale_refeicao" | "excel_export",
+"target_table": "nome_da_tabela",
+"description": "o que está fazendo",
+"analysis_complete": true/false
+}}
+"""
+
+# IA responde e sistema executa a ação
+response = llm.complete(action_prompt)
+action_plan = json.loads(response.text)
+```
+
+**🤖 Como a IA funciona aqui:**
+- **Planeja estratégia** baseada no objetivo
+- **Decide próxima ação** em cada iteração
+- **Escolhe tabelas relevantes** para consultar
+- **Determina quando usar** ferramentas específicas
+- **Adapta-se aos resultados** de etapas anteriores
+- **Finaliza quando** objetivo é atingido
+
+#### **3. 💰 Tool de Cálculo Vale Refeição (Lógica Determinística)**
+**Localização:** `src/ui/pages/database_viewer.py` → `calculo_vale_refeicao_tool()`
+
+⚠️ **IMPORTANTE:** Esta tool **NÃO usa IA diretamente**. Ela implementa **lógica de negócio determinística**:
+
+```python
+def calculo_vale_refeicao_tool(db, data_tables: list) -> dict:
+    """
+    Tool especializada para cálculo de vale refeição
+    Implementa a lógica de negócio específica do RH brasileiro
+    """
+    # 1. Carrega dados (SEM IA)
+    ativos_df = pd.read_sql('SELECT * FROM "ativos"', db.engine)
+    
+    # 2. Aplica regras fixas (SEM IA)
+    if ' SP ' in sindicato_upper:
+        valor_diario = 37.50  # São Paulo
+    else:
+        valor_diario = 35.00  # Outros estados
+    
+    # 3. Calcula valores (SEM IA)
+    valor_total_vr = valor_diario * 22  # 22 dias úteis
+    
+    # 4. Gera relatório Excel (SEM IA)
+    return export_to_excel(resultados)
+```
+
+**🔧 Por que não usa IA:**
+- **Precisão garantida** - cálculos financeiros devem ser exatos
+- **Conformidade legal** - regras trabalhistas são fixas
+- **Auditoria** - resultados devem ser reproduzíveis
+- **Performance** - processamento rápido de milhares de registros
+
+### 🔄 **Fluxo Completo com IA**
+
+```mermaid
+graph TD
+    A[👤 Usuário define prompt] --> B[🧠 IA Orquestradora]
+    B --> C[🧠 IA Autônoma planeja]
+    C --> D[🧠 IA decide próxima ação]
+    D --> E{Qual ação?}
+    E -->|SQL Query| F[📊 Consulta dados]
+    E -->|Cálculo VR| G[💰 Tool determinística]
+    E -->|Export Excel| H[📊 Gera relatório]
+    F --> I[🧠 IA avalia resultado]
+    G --> I
+    H --> I
+    I --> J{Objetivo completo?}
+    J -->|Não| D
+    J -->|Sim| K[✅ Finaliza]
+```
+
+### 🎯 **Resumo: IA vs Lógica Determinística**
+
+| Componente | Usa IA? | Função da IA | Por que? |
+|------------|---------|--------------|----------|
+| **Orquestração** | ✅ SIM | Interpreta prompts, planeja execução | Flexibilidade e adaptação |
+| **Decisão de Ações** | ✅ SIM | Escolhe próximos passos | Autonomia inteligente |
+| **Cálculo VR** | ❌ NÃO | Apenas chama a tool | IA decide QUANDO usar |
+| **Tool VR** | ❌ NÃO | Lógica de negócio fixa | Precisão e conformidade |
+| **Geração SQL** | ✅ SIM | Cria queries baseadas no contexto | Adaptação aos dados |
+| **Exportação** | ❌ NÃO | Formatação padronizada | Consistência de formato |
+
+### 💡 **Vantagens desta Arquitetura**
+
+- **🧠 Inteligência** onde precisa (planejamento, adaptação)
+- **🎯 Determinismo** onde importa (cálculos, compliance)
+- **🔄 Flexibilidade** para novos cenários
+- **⚡ Performance** otimizada
+- **🔍 Transparência** total com logs
 
 ## 🤖 Exemplos de Uso dos Agentes
 
