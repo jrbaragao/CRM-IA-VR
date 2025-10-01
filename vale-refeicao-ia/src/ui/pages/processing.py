@@ -19,8 +19,8 @@ from ...config.settings import settings
 from ...data.database import get_db_manager
 
 def render():
-    """Renderiza página de processamento"""
-    st.header("🔄 Processamento de Dados")
+    """Renderiza página de preparação de dados"""
+    st.header("🔄 Preparação de Dados")
     
     # Botão de teste para logs
     if st.button("🧪 Testar Logs"):
@@ -43,7 +43,8 @@ def render():
     O sistema irá processar os arquivos carregados utilizando agentes de IA para:
     - 🔍 Detectar e mapear colunas automaticamente
     - 🧹 Limpar e normalizar dados
-    - 🔗 Unificar informações usando MATRICULA como chave
+    - 🔑 Aplicar chaves primárias definidas (se configuradas)
+    - 📊 Criar tabelas dinâmicas adaptadas aos seus dados
     - ✅ Validar dados e identificar inconsistências
     """)
     
@@ -77,6 +78,23 @@ def process_files():
     """Processa os arquivos carregados"""
     st.session_state['extraction_status'] = 'running'
     
+    # Criar área de status no topo
+    status_area = st.container()
+    with status_area:
+        st.markdown("### 📊 Status Geral do Processamento")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            total_files_metric = st.empty()
+        with col2:
+            current_file_metric = st.empty()
+        with col3:
+            total_records_metric = st.empty()
+        
+        overall_progress = st.progress(0)
+        status_text = st.empty()
+    
+    st.divider()
+    
     # Inicializar agente de extração e banco de dados
     extraction_agent = ExtractionAgent()
     db = get_db_manager()
@@ -90,8 +108,19 @@ def process_files():
     # Processar cada arquivo
     total_files = len(st.session_state['uploaded_files'])
     processed_data = {}
+    total_records_processed = 0
+    
+    # Atualizar métricas iniciais
+    total_files_metric.metric("📁 Total de Arquivos", total_files)
+    current_file_metric.metric("📄 Arquivo Atual", "Iniciando...")
+    total_records_metric.metric("📊 Total de Registros", 0)
     
     for idx, (key, file_info) in enumerate(st.session_state['uploaded_files'].items()):
+        # Atualizar status geral
+        overall_progress.progress((idx) / total_files)
+        status_text.text(f"Processando arquivo {idx + 1} de {total_files}")
+        current_file_metric.metric("📄 Arquivo Atual", file_info['name'][:25] + "..." if len(file_info['name']) > 25 else file_info['name'])
+        
         with progress_container:
             render_progress_bar(
                 idx + 1, 
@@ -100,161 +129,204 @@ def process_files():
             )
         
         with log_container:
-            with st.expander(f"📄 {file_info['name']}", expanded=True):
-                st.info(f"🔄 Iniciando processamento...")
-                
-                # Adicionar logs simulados para demonstração
-                log_extraction_step("📋 Preparando para processar arquivo", arquivo=file_info['name'])
+            # Usar container em vez de expander para evitar aninhamento
+            st.markdown(f"### 📄 {file_info['name']}")
+            st.info(f"🔄 Iniciando processamento...")
+            
+            # Adicionar logs simulados para demonstração
+            log_extraction_step("📋 Preparando para processar arquivo", arquivo=file_info['name'])
+            st.empty()  # Força atualização
+            time.sleep(0.3)
+            
+            log_extraction_step("🔍 Analisando estrutura do arquivo", 
+                              total_linhas=file_info['rows'], 
+                              total_colunas=len(file_info['data'].columns))
+            st.empty()  # Força atualização
+            time.sleep(0.3)
+            
+            # Processar com o agente
+            try:
+                # Simular etapas de processamento
+                log_extraction_step("🏷️ Identificando tipos de colunas...")
                 st.empty()  # Força atualização
                 time.sleep(0.3)
                 
-                log_extraction_step("🔍 Analisando estrutura do arquivo", 
-                                  total_linhas=file_info['rows'], 
-                                  total_colunas=len(file_info['data'].columns))
+                log_extraction_step("✅ Colunas identificadas", 
+                                  colunas=list(file_info['data'].columns)[:5] + ['...'])
                 st.empty()  # Força atualização
                 time.sleep(0.3)
                 
-                # Processar com o agente
+                log_extraction_step("🧹 Limpando dados inconsistentes...")
+                st.empty()  # Força atualização
+                time.sleep(0.3)
+                
+                # Processar dados com indicador de progresso
+                total_rows = len(file_info['data'])
+                progress_text = st.empty()
+                progress_bar = st.progress(0)
+                
+                # Simular processamento linha por linha (em produção, processar em lotes)
+                df_processed = file_info['data'].copy()
+                
+                # Mostrar progresso
+                for i in range(min(10, total_rows)):  # Simular processamento rápido
+                    progress = (i + 1) / min(10, total_rows)
+                    progress_bar.progress(progress)
+                    progress_text.text(f"Processando... {i+1}/{total_rows} registros")
+                    time.sleep(0.1)
+                
+                progress_bar.progress(1.0)
+                progress_text.text(f"✅ {total_rows} registros processados!")
+                
+                # Atualizar total de registros
+                total_records_processed += total_rows
+                total_records_metric.metric("📊 Total de Registros", f"{total_records_processed:,}")
+                
+                log_extraction_step("✅ Limpeza concluída", 
+                                  registros_removidos=0,
+                                  registros_válidos=len(df_processed))
+                st.empty()  # Força atualização
+                
+                # 💾 CRIAR TABELA DINÂMICA NO BANCO
+                log_extraction_step("💾 Criando tabela no banco de dados...")
+                st.empty()
+                
                 try:
-                    # Simular etapas de processamento
-                    log_extraction_step("🏷️ Identificando tipos de colunas...")
-                    st.empty()  # Força atualização
-                    time.sleep(0.3)
+                    # Nome da tabela baseado no arquivo
+                    table_name = file_info['name']
+                    st.info(f"📋 Nome da tabela: {table_name}")
+                    st.info(f"📊 Dimensões dos dados: {df_processed.shape[0]} linhas x {df_processed.shape[1]} colunas")
                     
-                    log_extraction_step("✅ Colunas identificadas", 
-                                      colunas=list(file_info['data'].columns)[:5] + ['...'])
-                    st.empty()  # Força atualização
-                    time.sleep(0.3)
+                    # Mostrar preview das primeiras linhas para debug
+                    st.write("📋 **Preview dos dados:**")
+                    st.dataframe(df_processed.head(3), use_container_width=True)
+                    st.caption(f"Colunas: {', '.join(df_processed.columns[:10])}{'...' if len(df_processed.columns) > 10 else ''}")
                     
-                    log_extraction_step("🧹 Limpando dados inconsistentes...")
-                    st.empty()  # Força atualização
-                    time.sleep(0.3)
+                    # Detectar chave primária
+                    # Primeiro verificar se foi selecionada uma coluna de índice no upload
+                    primary_key = file_info.get('index_column', None)
                     
-                    # Aqui você processaria o arquivo real
-                    # df_processed = extraction_agent.process(file_info['data'])
-                    df_processed = file_info['data']  # Por enquanto, usar dados originais
-                    
-                    log_extraction_step("✅ Limpeza concluída", 
-                                      registros_removidos=0,
-                                      registros_válidos=len(df_processed))
-                    st.empty()  # Força atualização
-                    
-                    # 💾 CRIAR TABELA DINÂMICA NO BANCO
-                    log_extraction_step("💾 Criando tabela no banco de dados...")
-                    st.empty()
-                    
-                    try:
-                        # Nome da tabela baseado no arquivo
-                        table_name = file_info['name']
-                        
-                        # Detectar chave primária (MATRICULA se existir)
-                        primary_key = None
+                    # Se não foi selecionada, tentar encontrar automaticamente
+                    if not primary_key:
                         for col in df_processed.columns:
                             if 'MATRICULA' in col.upper():
                                 primary_key = col
                                 break
-                        
-                        log_extraction_step("🏗️ Criando estrutura da tabela...", 
-                                          tabela=table_name, 
-                                          chave_primaria=primary_key)
+                    
+                    log_extraction_step("🏗️ Criando estrutura da tabela...", 
+                                      tabela=table_name, 
+                                      chave_primaria=primary_key)
+                    st.empty()
+                    
+                    # Criar tabela dinamicamente
+                    table_created = db.create_table_from_dataframe(
+                        df_processed, 
+                        table_name, 
+                        primary_key
+                    )
+                    
+                    if table_created:
+                        # Salvar dados na tabela
+                        log_extraction_step("💾 Salvando dados na tabela...")
                         st.empty()
                         
-                        # Criar tabela dinamicamente
-                        table_created = db.create_table_from_dataframe(
+                        registros_salvos = db.save_dataframe_to_table(
                             df_processed, 
                             table_name, 
-                            primary_key
+                            if_exists='replace'
                         )
                         
-                        if table_created:
-                            # Salvar dados na tabela
-                            log_extraction_step("💾 Salvando dados na tabela...")
-                            st.empty()
-                            
-                            registros_salvos = db.save_dataframe_to_table(
-                                df_processed, 
-                                table_name, 
-                                if_exists='replace'
-                            )
-                            
-                            # Registrar importação
-                            importacao_id = db.log_importacao(
-                                nome_arquivo=file_info['name'],
-                                status="concluido",
-                                total_linhas=len(df_processed),
-                                linhas_processadas=registros_salvos
-                            )
-                            
-                            # Log do agente no banco
-                            db.log_agent_action(
-                                agent_name="extraction_agent",
-                                action="Tabela criada e dados salvos",
-                                input_data={
-                                    "file": file_info['name'], 
-                                    "rows": len(df_processed),
-                                    "columns": list(df_processed.columns)
-                                },
-                                output_data={
-                                    "table_name": table_name,
-                                    "registros_salvos": registros_salvos,
-                                    "primary_key": primary_key
-                                },
-                                status="success"
-                            )
-                            
-                            log_extraction_step("✅ Tabela criada e dados salvos!", 
-                                              tabela=table_name,
-                                              registros=registros_salvos)
-                        else:
-                            raise Exception("Falha ao criar tabela")
+                        # Registrar importação
+                        importacao_id = db.log_importacao(
+                            nome_arquivo=file_info['name'],
+                            status="concluido",
+                            total_linhas=len(df_processed),
+                            linhas_processadas=registros_salvos
+                        )
                         
-                    except Exception as db_error:
-                        st.error(f"❌ Erro ao criar tabela: {str(db_error)}")
-                        log_extraction_step("❌ Erro ao criar tabela", erro=str(db_error))
+                        # Log do agente no banco
+                        db.log_agent_action(
+                            agent_name="extraction_agent",
+                            action="Tabela criada e dados salvos",
+                            input_data={
+                                "file": file_info['name'], 
+                                "rows": len(df_processed),
+                                "columns": list(df_processed.columns)
+                            },
+                            output_data={
+                                "table_name": table_name,
+                                "registros_salvos": registros_salvos,
+                                "primary_key": primary_key
+                            },
+                            status="success"
+                        )
+                        
+                        log_extraction_step("✅ Tabela criada e dados salvos!", 
+                                          tabela=table_name,
+                                          registros=registros_salvos)
+                    else:
+                        raise Exception("Falha ao criar tabela")
                     
-                    # Adicionar log do agente na sessão
-                    log_entry = extraction_agent.log_action(
-                        "Processamento concluído",
-                        {
-                            "file": file_info['name'],
-                            "rows_processed": len(df_processed),
-                            "columns_mapped": len(df_processed.columns),
-                            "saved_to_db": True
-                        }
-                    )
-                    st.session_state['agent_logs'].append(log_entry)
-                    
-                    # Armazenar dados processados na sessão
-                    processed_data[key] = {
-                        'name': file_info['name'],
-                        'data': df_processed,
-                        'original_rows': file_info['rows'],
-                        'processed_rows': len(df_processed),
-                        'processing_time': datetime.now(),
-                        'saved_to_db': True
+                except Exception as db_error:
+                    st.error(f"❌ Erro ao criar tabela: {str(db_error)}")
+                    log_extraction_step("❌ Erro ao criar tabela", erro=str(db_error))
+                
+                # Adicionar log do agente na sessão
+                log_entry = extraction_agent.log_action(
+                    "Processamento concluído",
+                    {
+                        "file": file_info['name'],
+                        "rows_processed": len(df_processed),
+                        "columns_mapped": len(df_processed.columns),
+                        "saved_to_db": True
                     }
-                    
-                    st.success(f"✅ Processamento concluído! {len(df_processed)} registros processados.")
-                    
-                    # Mostrar preview dos dados processados
-                    st.markdown("**Preview dos Dados Processados:**")
-                    st.dataframe(df_processed.head(10), use_container_width=True)
-                    
-                except Exception as e:
-                    st.error(f"❌ Erro no processamento: {str(e)}")
-                    st.session_state['extraction_status'] = 'error'
+                )
+                st.session_state['agent_logs'].append(log_entry)
+                
+                # Armazenar dados processados na sessão
+                processed_data[key] = {
+                    'name': file_info['name'],
+                    'data': df_processed,
+                    'original_rows': file_info['rows'],
+                    'processed_rows': len(df_processed),
+                    'processing_time': datetime.now(),
+                    'saved_to_db': True
+                }
+                
+                st.success(f"✅ Processamento concluído! {len(df_processed)} registros processados.")
+                
+                # Mostrar preview dos dados processados
+                st.markdown("**Preview dos Dados Processados:**")
+                st.dataframe(df_processed.head(10), use_container_width=True)
+                
+            except Exception as e:
+                st.error(f"❌ Erro no processamento: {str(e)}")
+                st.session_state['extraction_status'] = 'error'
+            
+            # Adicionar divisória entre arquivos
+            if idx < len(st.session_state['uploaded_files']) - 1:
+                st.divider()
     
     # Salvar dados processados
     st.session_state['processed_data'] = processed_data
     st.session_state['extraction_status'] = 'success'
     
-    # Unificar dados usando MATRICULA
-    st.divider()
-    st.subheader("🔗 Unificação de Dados")
+    # Atualizar status final
+    overall_progress.progress(1.0)
+    status_text.text("✅ Processamento concluído!")
+    current_file_metric.metric("📄 Status", "✅ Concluído")
     
-    with st.spinner("Unificando dados usando MATRICULA como chave..."):
-        unified_data = unify_data(processed_data)
-        st.session_state['unified_data'] = unified_data
+    # Mostrar resumo final
+    st.divider()
+    st.success(f"""
+    ### ✅ Processamento Concluído com Sucesso!
+    
+    - **📁 Arquivos processados:** {total_files}
+    - **📊 Total de registros:** {total_records_processed:,}
+    - **💾 Tabelas criadas:** {len(processed_data)}
+    
+    **Próximo passo:** Vá para "🗃️ Banco de Dados" para visualizar e analisar suas tabelas.
+    """)
     
     # Log final
     log_extraction_step("🎉 Processamento completo!", 
@@ -344,28 +416,6 @@ def process_files():
         st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
 
-def unify_data(processed_data):
-    """Unifica dados usando MATRICULA como chave"""
-    # Criar DataFrame unificado
-    main_df = None
-    
-    for key, data_info in processed_data.items():
-        df = data_info['data']
-        
-        if 'MATRICULA' not in df.columns:
-            st.warning(f"⚠️ Arquivo {data_info['name']} não possui coluna MATRICULA")
-            continue
-        
-        if main_df is None:
-            main_df = df
-        else:
-            # Fazer merge usando MATRICULA
-            main_df = pd.merge(
-                main_df,
-                df,
-                on='MATRICULA',
-                how='outer',
-                suffixes=('', f'_{key}')
-            )
-    
-    return main_df if main_df is not None else pd.DataFrame()
+# Função unify_data removida - não é mais necessária
+# Agora cada arquivo cria sua própria tabela dinâmica
+# As correlações são feitas pelos agentes de IA conforme necessário

@@ -1368,6 +1368,8 @@ def generate_sql_from_prompt(question: str, schema_context: str) -> str:
         system_prompt = f"""
 Você é um especialista em SQL que converte perguntas em linguagem natural para consultas SQL válidas.
 
+Analise a pergunta do usuário e gere a consulta SQL correspondente de forma precisa.
+
 ESQUEMA DO BANCO DE DADOS:
 {schema_context}
 
@@ -1575,9 +1577,18 @@ def execute_query_anywhere(db, sql_query: str, question: str = "Consulta"):
 def execute_autonomous_agent(db, data_tables, question: str, config: dict, container):
     """Executa agente autônomo de IA para análise complexa"""
     
+    # Extrair a pergunta real se vier com contexto adicional
+    display_question = question
+    if "OBJETIVO:" in question:
+        lines = question.split('\n')
+        for line in lines:
+            if line.strip().startswith('OBJETIVO:'):
+                display_question = line.replace('OBJETIVO:', '').strip()
+                break
+    
     with container.container():
         st.markdown("## 🧠 Agente Autônomo em Ação")
-        st.markdown(f"**Pergunta:** {question}")
+        st.markdown(f"**Pergunta:** {display_question}")
         
         # Limpar qualquer cache de análises anteriores
         if 'agent_analyses' in st.session_state:
@@ -1620,7 +1631,7 @@ def execute_autonomous_agent(db, data_tables, question: str, config: dict, conta
             execution_id = str(uuid.uuid4())[:8]
             
             st.markdown(f"**🆔 ID da Execução:** `{execution_id}`")
-            st.markdown(f"**❓ Pergunta Atual:** `{question}`")
+            st.markdown(f"**❓ Pergunta Atual:** `{display_question}`")
             
             # Mostrar o prompt que será enviado para o agente
             with st.expander("🔍 Ver Prompt Enviado para o Agente", expanded=False):
@@ -1629,10 +1640,13 @@ def execute_autonomous_agent(db, data_tables, question: str, config: dict, conta
                 # Gerar o mesmo prompt que será usado
                 tables_list = ', '.join(data_tables) if data_tables else 'Nenhuma'
                 
+                # Usar a pergunta limpa no preview também
+                preview_question = display_question
+                
                 planning_prompt_preview = f"""
 Você é um agente autônomo especializado. Seu objetivo é:
 
-{question}
+{preview_question}
 
 Tabelas disponíveis: {tables_list}
 
@@ -1706,6 +1720,23 @@ Crie um plano estruturado em JSON com as chaves:
                 iteration_result = execute_analysis_iteration(
                     llm, db, data_tables, current_context, config, iteration
                 )
+                
+                # Log do resultado da iteração
+                if iteration_result.get('error'):
+                    st.session_state['agent_logs'].append({
+                        'timestamp': datetime.now().strftime('%H:%M:%S'),
+                        'agent': 'analysis_iteration',
+                        'action': f'❌ Erro na Etapa {iteration + 2}',
+                        'details': f"Erro: {iteration_result.get('error', 'None')}"
+                    })
+                elif iteration_result.get('action_type') == 'eda_analysis':
+                    # Log específico para EDA
+                    st.session_state['agent_logs'].append({
+                        'timestamp': datetime.now().strftime('%H:%M:%S'),
+                        'agent': 'analysis_iteration',
+                        'action': f'📊 Etapa {iteration + 2} - Resultado EDA',
+                        'details': f"Sucesso: {iteration_result.get('success', False)}, Erro: {iteration_result.get('error', 'Nenhum')}"
+                    })
                 
                 analysis_steps.append({
                     'step': iteration + 2,
@@ -1834,23 +1865,47 @@ Crie um plano estruturado em JSON com as chaves:
 def plan_analysis_approach(llm, question: str, data_tables: list, db, config: dict, execution_id: str = None) -> dict:
     """Planeja abordagem usando o prompt do usuário como objetivo principal"""
     
+    # Extrair a pergunta real se vier com contexto adicional
+    original_question = question
+    if "OBJETIVO:" in question:
+        lines = question.split('\n')
+        for line in lines:
+            if line.strip().startswith('OBJETIVO:'):
+                question = line.replace('OBJETIVO:', '').strip()
+                break
+    
     # Informações básicas das tabelas disponíveis
     tables_list = ', '.join(data_tables) if data_tables else 'Nenhuma'
     
     # Usar o prompt do usuário como objetivo, apenas adicionando contexto mínimo
     planning_prompt = f"""
-Você é um agente autônomo especializado. Seu objetivo é:
+Você é um agente autônomo especializado em análise de dados. 
 
-{question}
+IMPORTANTE: Analise a complexidade da pergunta e escolha a abordagem mais simples e direta possível.
+
+Pergunta do usuário: {question}
 
 Tabelas disponíveis: {tables_list}
 
-Crie um plano estruturado em JSON com as chaves:
-- objectives: [lista dos objetivos baseados no prompt do usuário]
-- tables_to_use: [tabelas que serão utilizadas, se aplicável]
-- analysis_types: [tipos de análises necessárias]
-- steps: [sequência de etapas para atingir o objetivo]
-- challenges: [possíveis desafios]
+DIRETRIZES:
+- Para perguntas simples (contar, somar, média), use apenas SQL básico
+- Para perguntas sobre distribuições ou padrões, use análise EDA
+- Sempre prefira a solução mais simples que responda a pergunta
+- Se a pergunta pede apenas um número, retorne apenas o número
+
+Exemplos de perguntas simples que precisam apenas SQL:
+- "Quantos registros existem?" → SELECT COUNT(*)"
+- "Qual a média de X?" → SELECT AVG(X)
+- "Qual o maior valor?" → SELECT MAX(X)
+
+Crie um plano MÍNIMO em JSON:
+{{
+  "objectives": [objetivo principal],
+  "tables_to_use": [apenas tabelas necessárias],
+  "analysis_types": ["sql_query" para perguntas simples, "eda_analysis" para análises complexas],
+  "steps": [mínimo de passos necessários],
+  "complexity": "simple" ou "complex"
+}}
     """
     
     try:
@@ -1928,12 +1983,76 @@ Resposta em 2-3 frases.
         "total_columns": sum(len(info.get('columns', [])) for info in schema_details.values())
     }
 
+def generate_simple_sql(question: str, table: str) -> str:
+    """Gera SQL simples baseado em palavras-chave da pergunta"""
+    q_lower = question.lower()
+    
+    if any(word in q_lower for word in ['quantos', 'quantidade', 'contar', 'total de registros']):
+        return f'SELECT COUNT(*) as total FROM "{table}"'
+    elif 'média' in q_lower or 'media' in q_lower:
+        # Precisaria saber a coluna, mas vamos deixar genérico
+        return f'SELECT AVG(*) FROM "{table}"'
+    elif 'soma' in q_lower or 'sum' in q_lower:
+        return f'SELECT SUM(*) FROM "{table}"'
+    elif 'máximo' in q_lower or 'maximo' in q_lower or 'maior' in q_lower:
+        return f'SELECT MAX(*) FROM "{table}"'
+    elif 'mínimo' in q_lower or 'minimo' in q_lower or 'menor' in q_lower:
+        return f'SELECT MIN(*) FROM "{table}"'
+    else:
+        return f'SELECT COUNT(*) FROM "{table}"'
+
 def execute_analysis_iteration(llm, db, data_tables: list, context: dict, config: dict, iteration: int) -> dict:
     """Executa uma iteração de análise usando IA para determinar próxima ação"""
+    
+    # Log inicial da iteração
+    if 'agent_logs' not in st.session_state:
+        st.session_state['agent_logs'] = []
+    
+    st.session_state['agent_logs'].append({
+        'timestamp': datetime.now().strftime('%H:%M:%S'),
+        'agent': 'analysis_iteration',
+        'action': f'🔍 Etapa {iteration + 2}: Análise Iterativa {iteration}',
+        'details': 'Iniciando análise de dados...'
+    })
     
     # Obter contexto completo
     plan = context.get('plan', {}).get('plan', {})
     user_question = context.get('user_objective', context.get('question', ''))
+    
+    # Extrair a pergunta real se estiver em um contexto maior
+    if "OBJETIVO:" in user_question:
+        # Extrair apenas a linha do objetivo
+        lines = user_question.split('\n')
+        for line in lines:
+            if line.strip().startswith('OBJETIVO:'):
+                user_question = line.replace('OBJETIVO:', '').strip()
+                # Remover aspas extras no final se existirem
+                if user_question.endswith('"'):
+                    user_question = user_question.rstrip('"')
+                break
+    
+    # Log da pergunta extraída
+    st.session_state['agent_logs'].append({
+        'timestamp': datetime.now().strftime('%H:%M:%S'),
+        'agent': 'question_parser',
+        'action': '📝 Pergunta extraída',
+        'details': {'pergunta_original': context.get('user_objective', '')[:100], 'pergunta_extraida': user_question}
+    })
+    
+    # Detectar perguntas simples de tendência central
+    is_simple_stats_question = False
+    question_lower = user_question.lower()
+    stats_keywords = ['média', 'mediana', 'tendência central', 'media', 'median']
+    simple_stats = ['média', 'mediana']
+    
+    # Se a pergunta só pede média e/ou mediana, é simples
+    if any(keyword in question_lower for keyword in stats_keywords):
+        # Verificar se não pede análises complexas adicionais
+        complex_keywords = ['distribuição', 'padrão', 'outlier', 'correlação', 'tendência', 'análise completa']
+        if not any(complex in question_lower for complex in complex_keywords):
+            # É uma pergunta simples de estatística
+            is_simple_stats_question = True
+    
     previous_findings = context.get('findings', [])
     schema_info = context.get('schema', {})
     
@@ -2001,26 +2120,153 @@ def execute_analysis_iteration(llm, db, data_tables: list, context: dict, config
     # Verificar se ainda há passos a executar
     has_more_steps = iteration < total_steps
     
-    action_prompt = f"""
-OBJETIVO: {objective_short}
+    # Verificar se é uma pergunta simples (apenas SQL básico)
+    is_simple_question = any(keyword in user_question.lower() for keyword in [
+        'quantos', 'quantidade', 'contar', 'total de registros',
+        'soma', 'máximo', 'mínimo', 'maior valor', 'menor valor'
+    ])
+    
+    # Verificar se precisa de análise estatística complexa ou visualização
+    needs_statistical_analysis = any(keyword in user_question.lower() for keyword in [
+        'mediana', 'desvio padrão', 'quartil', 'percentil', 'distribuição',
+        'tendência central', 'variância', 'moda', 'assimetria', 'curtose',
+        'correlação', 'outlier', 'boxplot', 'histograma',
+        # Palavras-chave para gráficos e visualizações
+        'gráfico', 'grafico', 'plot', 'scatter', 'dispersão', 'dispersao',
+        'visualize', 'visualização', 'visualizacao', 'mostre graficamente',
+        'faça um gráfico', 'crie um gráfico', 'gere um gráfico',
+        'linha', 'barra', 'pizza', 'heatmap', 'mapa de calor'
+    ])
+    
+    # Log para debug
+    if needs_statistical_analysis:
+        st.session_state['agent_logs'].append({
+            'timestamp': datetime.now().strftime('%H:%M:%S'),
+            'agent': 'decision_engine',
+            'action': '🎯 Detectada necessidade de análise estatística/visualização',
+            'details': {
+                'pergunta_extraida': user_question,
+                'needs_stats': needs_statistical_analysis,
+                'is_simple': is_simple_question
+            }
+        })
+    
+    # Verificação DIRETA para gráficos - PRIMEIRA COISA A VERIFICAR
+    graph_keywords = ['gráfico', 'grafico', 'plot', 'scatter', 'dispersão', 'dispersao',
+                      'visualiz', 'graph', 'chart', 'eixo x', 'eixo y', 'axis',
+                      'faça um gráfico', 'fazer um gráfico', 'crie um gráfico', 'criar um gráfico',
+                      'gere um gráfico', 'gerar um gráfico', 'mostre graficamente',
+                      'time no eixo', 'amount no eixo']
+    
+    if any(keyword in user_question.lower() for keyword in graph_keywords):
+        # Forçar diretamente para gráficos
+        st.session_state['agent_logs'].append({
+            'timestamp': datetime.now().strftime('%H:%M:%S'),
+            'agent': 'decision_engine',
+            'action': '🎯 GRÁFICO DETECTADO - Forçando análise Python',
+            'details': {'pergunta': user_question}
+        })
+        
+        return {
+            "action_type": "eda_analysis",
+            "target_table": data_tables[0] if data_tables else 'tabela',
+            "query": user_question,
+            "description": "Gerando visualização gráfica solicitada",
+            "analysis_complete": True,
+            "reasoning": "Detecção direta de solicitação de gráfico"
+        }
+    
+    # Se menciona média E mediana, precisa de análise complexa
+    if 'média' in user_question.lower() and 'mediana' in user_question.lower():
+        is_simple_question = False
+        needs_statistical_analysis = True
+    
+    # Para perguntas simples de média e mediana, executar e marcar como completo
+    if is_simple_stats_question and iteration == 1:
+        action_prompt = f"""
+A pergunta "{user_question}" é sobre medidas de tendência central básicas (média e mediana).
 
-{current_step_info}
+Execute APENAS o cálculo necessário e marque como completo.
+
+Responda EXATAMENTE este JSON:
+{{
+"action_type": "eda_analysis",
+"target_table": "{data_tables[0] if data_tables else 'tabela'}",
+"query": "{user_question}",
+"description": "Calculando média e mediana",
+"analysis_complete": true,
+"reasoning": "Pergunta simples de estatística - apenas um cálculo necessário"
+}}
+"""
+    
+    # Para perguntas que precisam de análise estatística complexa ou gráficos
+    elif needs_statistical_analysis:
+        # Detectar se é especificamente sobre gráficos
+        is_graph_request = any(keyword in user_question.lower() for keyword in [
+            'gráfico', 'grafico', 'plot', 'scatter', 'dispersão', 'dispersao',
+            'visualize', 'visualização', 'visualizacao', 'mostre graficamente',
+            'faça um gráfico', 'crie um gráfico', 'gere um gráfico',
+            'generate a scatter', 'create a scatter', 'make a scatter',
+            'time no eixo x', 'amount no eixo y', 'eixo x', 'eixo y'
+        ])
+        
+        if is_graph_request:
+            description = "Gerando visualização gráfica"
+        else:
+            description = "Executando análise estatística com Python"
+        
+        action_prompt = f"""
+A pergunta "{user_question}" requer {"VISUALIZAÇÃO GRÁFICA" if is_graph_request else "ANÁLISE ESTATÍSTICA"} que deve ser feita com Python.
+
+{"Use Python para criar o gráfico solicitado." if is_graph_request else "Use Python para calcular estatísticas como mediana, desvio padrão, etc."}
+
+Responda EXATAMENTE este JSON:
+{{
+"action_type": "eda_analysis",
+"target_table": "{data_tables[0] if data_tables else 'tabela'}",
+"query": "{user_question}",
+"description": "{description}",
+"analysis_complete": true
+}}
+"""
+    # Para perguntas simples, forçar resposta direta SQL
+    elif is_simple_question and iteration == 1:
+        action_prompt = f"""
+A pergunta "{user_question}" é SIMPLES e requer apenas uma consulta SQL.
+
+Tabela disponível: {data_tables[0] if data_tables else 'tabela'}
+
+Responda EXATAMENTE este JSON:
+{{
+"action_type": "sql_query",
+"target_table": "{data_tables[0] if data_tables else 'tabela'}",
+"sql_query": "{generate_simple_sql(user_question, data_tables[0] if data_tables else 'tabela')}",
+"description": "Executando consulta SQL",
+"analysis_complete": true
+}}
+"""
+    else:
+        action_prompt = f"""
+PERGUNTA: {user_question}
 
 TABELAS: {tables_short}
 
-IMPORTANTE: 
-- Você DEVE executar TODOS os {total_steps} passos do plano.
-- Escolha apenas a TABELA mais relevante para este passo
-- NÃO gere SQL - isso será feito automaticamente
+FERRAMENTAS:
+- "sql_query": Para consultas diretas (COUNT, SUM, AVG, MAX, MIN, SELECT)
+- "eda_analysis": Para análises complexas (distribuições, correlações, outliers) e QUALQUER GRÁFICO/VISUALIZAÇÃO
 
-Iteração atual: {iteration}/{total_steps}
-{"CONTINUE executando o passo atual. NÃO marque como completo ainda." if has_more_steps else "Este é o ÚLTIMO passo. Pode marcar como completo."}
+REGRAS:
+1. Se pede GRÁFICO ou VISUALIZAÇÃO → SEMPRE use "eda_analysis"
+2. Se pode ser respondida com SQL simples → use "sql_query"
+3. Se precisa cálculos estatísticos complexos → use "eda_analysis"
 
 Responda APENAS JSON:
 {{
-"action_type": "sql_query",
-"target_table": "nome_da_tabela_relevante",
-"description": "executando passo {iteration}: [descrição do que está fazendo]",
+"action_type": "sql_query" ou "eda_analysis",
+"target_table": "{data_tables[0] if data_tables else 'tabela'}",
+"sql_query": "consulta SQL se action_type for sql_query",
+"query": "descrição se action_type for eda_analysis",
+"description": "o que está fazendo",
 "analysis_complete": {str(not has_more_steps).lower()}
 }}
 """
@@ -2224,8 +2470,38 @@ Responda APENAS JSON:
                         "parse_error": "JSON inválido, usando fallback"
                     }
         
+        # Debug: log do action_plan completo
+        st.session_state['agent_logs'].append({
+            'timestamp': datetime.now().strftime('%H:%M:%S'),
+            'agent': 'debug_action_plan',
+            'action': '🔍 Action Plan Recebido',
+            'details': {
+                'action_type': action_plan.get('action_type', 'None'),
+                'has_query': 'query' in action_plan,
+                'has_description': 'description' in action_plan,
+                'reasoning': action_plan.get('reasoning', '')[:50]
+            }
+        })
+        
         # Executar ação determinada pela IA
         action_type = action_plan.get("action_type", "sql_query")
+        
+        # Log de debug para ver o que está sendo decidido
+        st.session_state['agent_logs'].append({
+            'timestamp': datetime.now().strftime('%H:%M:%S'),
+            'agent': 'decision_engine',
+            'action': f'🎯 Ação decidida: {action_type}',
+            'details': f"Descrição: {action_plan.get('description', '')[:100]}..."
+        })
+        
+        # Log adicional se houver erro no parse
+        if action_plan.get('parse_error'):
+            st.session_state['agent_logs'].append({
+                'timestamp': datetime.now().strftime('%H:%M:%S'),
+                'agent': 'decision_engine',
+                'action': '⚠️ Aviso: Erro no parse JSON',
+                'details': action_plan.get('parse_error', '')
+            })
         
         if action_type == "analysis_complete":
             return {
@@ -2238,6 +2514,115 @@ Responda APENAS JSON:
         
         elif action_type == "excel_export" and "excel_export" in config.get('available_tools', []):
             return execute_excel_export_action(db, data_tables, context, iteration)
+        
+        # NOVA TOOL: Análise Exploratória de Dados (EDA)
+        elif action_type == "eda_analysis":
+            # Debug: verificar disponibilidade da ferramenta
+            tools_available = config.get('available_tools', [])
+            st.session_state['agent_logs'].append({
+                'timestamp': datetime.now().strftime('%H:%M:%S'),
+                'agent': 'tool_check',
+                'action': '🔍 Verificando ferramenta EDA',
+                'details': {
+                    'eda_in_tools': "eda_analysis" in tools_available,
+                    'tools_list': tools_available,
+                    'config_keys': list(config.keys())
+                }
+            })
+            
+            if "eda_analysis" in tools_available:
+                try:
+                    # Log do que está sendo executado
+                    st.session_state['agent_logs'].append({
+                        'timestamp': datetime.now().strftime('%H:%M:%S'),
+                        'agent': 'eda_analysis',
+                        'action': 'Iniciando análise EDA com Python',
+                        'details': f"Query: {action_plan.get('query', action_plan.get('description', ''))}"
+                    })
+                
+                    # Usar a nova ferramenta Python EDA para análises complexas
+                    from ...utils.python_executor import execute_python_eda
+                
+                    st.session_state['agent_logs'].append({
+                        'timestamp': datetime.now().strftime('%H:%M:%S'),
+                        'agent': 'eda_analysis',
+                        'action': 'Gerando código Python para análise',
+                        'details': 'Criando análise estatística e visualizações'
+                    })
+                
+                    result = execute_python_eda(db, data_tables, action_plan.get("query", action_plan.get("description", "")))
+                
+                    if result and result.get('success'):
+                        st.session_state['agent_logs'].append({
+                            'timestamp': datetime.now().strftime('%H:%M:%S'),
+                            'agent': 'eda_analysis',
+                            'action': 'Análise EDA concluída com sucesso',
+                            'details': f"Tabelas analisadas: {', '.join(result.get('tables_analyzed', []))}"
+                        })
+                    else:
+                        st.session_state['agent_logs'].append({
+                            'timestamp': datetime.now().strftime('%H:%M:%S'),
+                            'agent': 'eda_analysis',
+                            'action': '⚠️ Análise EDA com aviso',
+                            'details': result.get('error', 'Erro desconhecido') if result else 'Resultado vazio'
+                        })
+                
+                    if result is None:
+                        result = {
+                            "action_type": "eda_analysis",
+                            "success": False,
+                            "error": "Erro ao executar análise EDA"
+                        }
+                    else:
+                        # Se a análise EDA foi bem-sucedida, marcar como completa
+                        if result.get('success', False):
+                            result['analysis_complete'] = True
+                            result['findings'] = result.get('findings', 'Análise EDA concluída com sucesso')
+                    return result
+                except ImportError as e:
+                    st.session_state['agent_logs'].append({
+                        'timestamp': datetime.now().strftime('%H:%M:%S'),
+                        'agent': 'eda_analysis',
+                        'action': '❌ Erro de importação',
+                        'details': f"Módulo não encontrado: {str(e)}"
+                    })
+                
+                    # Se falhar o import, tentar a ferramenta antiga
+                    try:
+                        from ...utils.eda_tool import execute_eda_analysis
+                        result = execute_eda_analysis(db, data_tables, action_plan.get("query", action_plan.get("description", "")))
+                        return result
+                    except Exception as e2:
+                        return {
+                            "action_type": "eda_analysis",
+                            "success": False,
+                            "error": f"Erro ao importar ferramenta EDA: {str(e)}"
+                        }
+                except Exception as e:
+                    st.session_state['agent_logs'].append({
+                        'timestamp': datetime.now().strftime('%H:%M:%S'),
+                        'agent': 'eda_analysis',
+                        'action': '❌ Erro na execução',
+                        'details': str(e)
+                    })
+                    return {
+                        "action_type": "eda_analysis",
+                        "success": False,
+                        "error": f"Erro na análise EDA: {str(e)}"
+                    }
+            else:
+                # Ferramenta EDA não está disponível
+                st.session_state['agent_logs'].append({
+                    'timestamp': datetime.now().strftime('%H:%M:%S'),
+                    'agent': 'tool_error',
+                    'action': '❌ Ferramenta EDA não disponível',
+                    'details': f"Ferramentas disponíveis: {tools_available}"
+                })
+                return {
+                    "action_type": "eda_analysis",
+                    "success": False,
+                    "error": "Ferramenta 'eda_analysis' não está habilitada na configuração"
+                }
         
         # NOVA TOOL: Cálculo de Vale Refeição
         elif action_type == "calculo_vale_refeicao" and "calculo_vale_refeicao" in config.get('available_tools', []):
@@ -2267,6 +2652,36 @@ Responda APENAS JSON:
                 result['description'] += f" + Planilha Excel gerada: {excel_result.get('filename', 'arquivo.xlsx')}"
             
             return result
+        
+        # Se a IA menciona análise exploratória ou estatística
+        elif any(term in action_plan.get("description", "").lower() for term in 
+                ["análise exploratória", "analise exploratoria", "eda", "estatísticas", "estatisticas",
+                 "distribuição", "distribuicao", "correlação", "correlacao", "outliers", "anomalias",
+                 "padrões", "padroes", "tendências", "tendencias", "descrição dos dados", "descricao dos dados",
+                 "tipos de dados", "tipo de dado", "numérico", "categórico", "tipos", "distribuições"]):
+            if "eda_analysis" in config.get('available_tools', []):
+                try:
+                    from ...utils.python_executor import execute_python_eda
+                    result = execute_python_eda(db, data_tables, action_plan.get("description", ""))
+                    if result is None:
+                        result = {
+                            "action_type": "eda_analysis",
+                            "success": False,
+                            "error": "Erro ao executar análise EDA"
+                        }
+                    return result
+                except ImportError:
+                    # Fallback para ferramenta antiga se nova não estiver disponível
+                    try:
+                        from ...utils.eda_tool import execute_eda_analysis
+                        result = execute_eda_analysis(db, data_tables, action_plan.get("description", ""))
+                        return result
+                    except Exception as e:
+                        return {
+                            "action_type": "eda_analysis", 
+                            "success": False,
+                            "error": f"Erro ao executar análise EDA: {str(e)}"
+                        }
         
         # Se a IA menciona cálculo de vale refeição
         elif ("vale refeição" in action_plan.get("description", "").lower() or 
@@ -2321,25 +2736,21 @@ Responda APENAS JSON:
                 # Gerar contexto do esquema para a tabela específica
                 schema_context = generate_schema_context(db, [target_table])
                 
-                # Criar pergunta ESPECÍFICA baseada no passo atual e contexto do vale refeição
+                # Criar pergunta baseada no passo atual do plano
                 step_description = action_plan.get('description', f'análise passo {iteration}')
                 
-                # Gerar pergunta mais específica baseada no número do passo e contexto
-                if iteration == 1 and "ativo" in target_table.lower():
-                    step_question = f"Listar todos os colaboradores ativos da tabela {target_table} com MATRICULA e NOME para identificar quem tem direito ao vale refeição"
-                elif iteration == 2 and ("ferias" in target_table.lower() or "afastamento" in target_table.lower()):
-                    step_question = f"Identificar MATRICULAS de colaboradores em férias ou afastados na tabela {target_table} que NÃO devem receber vale refeição"
-                elif iteration == 3 and ("aprendiz" in target_table.lower() or "estagio" in target_table.lower()):
-                    step_question = f"Listar MATRICULAS de aprendizes e estagiários na tabela {target_table} que são excluídos do vale refeição"
-                elif iteration == 4 and ("exterior" in target_table.lower() or "desligado" in target_table.lower()):
-                    step_question = f"Identificar MATRICULAS de colaboradores no exterior ou desligados na tabela {target_table} para exclusão do vale refeição"
-                elif iteration >= 5 and ("sindicato" in target_table.lower() or "valor" in target_table.lower()):
-                    step_question = f"Consultar valores de vale refeição por sindicato na tabela {target_table} para calcular o benefício de 22 dias úteis por colaborador"
-                elif iteration >= 7:
-                    step_question = f"Calcular o valor total de vale refeição multiplicando valor diário por 22 dias para cada colaborador elegível usando dados da tabela {target_table}"
+                # Verificar se é uma pergunta simples
+                is_simple = any(keyword in user_question.lower() for keyword in [
+                    'quantos', 'quantidade', 'contar', 'total de registros',
+                    'média', 'soma', 'máximo', 'mínimo', 'maior', 'menor'
+                ])
+                
+                # Para perguntas simples, usar a pergunta original diretamente
+                if is_simple:
+                    step_question = user_question
                 else:
-                    # Fallback com contexto de vale refeição
-                    step_question = f"Analisar dados da tabela {target_table} para {step_description} no contexto de cálculo de vale refeição considerando 22 dias úteis"
+                    # Usar a descrição do plano
+                    step_question = f"Para a tabela {target_table}: {step_description}"
                 
                 # Usar a função text-to-query existente que já valida colunas
                 try:
@@ -2389,12 +2800,17 @@ Responda APENAS JSON:
                 df_result = pd.read_sql(sql_query, db.engine)
                 query_result = df_result.to_dict('records')
                 
-                # Determinar se análise está completa baseado na resposta da IA
-                # MAS forçar a continuar se ainda há passos no plano
-                # IMPORTANTE: Só marcar como completo se executou TODOS os passos do plano
-                ai_says_complete = action_plan.get("analysis_complete", False)
-                all_steps_executed = iteration >= total_steps
-                analysis_complete = ai_says_complete and all_steps_executed
+                # Determinar se análise está completa
+                # Para perguntas simples, completar após primeira execução bem-sucedida
+                if is_simple:
+                    analysis_complete = True
+                    ai_says_complete = True  # Para perguntas simples, sempre completa
+                    all_steps_executed = True
+                else:
+                    # Para perguntas complexas, seguir o plano
+                    ai_says_complete = action_plan.get("analysis_complete", False)
+                    all_steps_executed = iteration >= total_steps
+                    analysis_complete = ai_says_complete and all_steps_executed
                 
                 # Log para debug da decisão de completude
                 st.session_state['agent_logs'].append({
@@ -2406,7 +2822,8 @@ Responda APENAS JSON:
                         'all_steps_executed': all_steps_executed,
                         'final_decision': analysis_complete,
                         'iteration': iteration,
-                        'total_steps': total_steps
+                        'total_steps': total_steps,
+                        'is_simple_question': is_simple
                     }
                 })
                 
@@ -2442,6 +2859,14 @@ Responda APENAS JSON:
             }
             
     except Exception as e:
+        # Log do erro
+        st.session_state['agent_logs'].append({
+            'timestamp': datetime.now().strftime('%H:%M:%S'),
+            'agent': 'analysis_iteration',
+            'action': f'❌ Erro na Etapa {iteration + 2}',
+            'details': f"Erro: {str(e)}\nTipo: {type(e).__name__}"
+        })
+        
         return {
             "action_type": "iteration_error",
             "description": f"Erro na iteração {iteration}",
@@ -3069,13 +3494,90 @@ def synthesize_final_results(llm, context: dict, config: dict) -> dict:
     # Verificar se deve gerar Excel baseado nas ferramentas disponíveis
     should_generate_excel = "excel_export" in config.get('available_tools', [])
     
+    # Extrair a pergunta real se estiver em contexto
+    question = context.get('user_objective', context.get('question', ''))
+    if "OBJETIVO:" in question:
+        lines = question.split('\n')
+        for line in lines:
+            if line.strip().startswith('OBJETIVO:'):
+                question = line.replace('OBJETIVO:', '').strip()
+                break
+    
+    # Construir resumo detalhado dos resultados
+    findings_summary = []
+    for i, finding in enumerate(context.get('findings', [])):
+        if isinstance(finding, dict):
+            # Extrair resultados específicos
+            if finding.get('query_result'):
+                # Se é resultado de SQL
+                results = finding['query_result']
+                if isinstance(results, list) and len(results) > 0:
+                    if isinstance(results[0], dict):
+                        # Formatar resultados
+                        for key, value in results[0].items():
+                            findings_summary.append(f"- {key}: {value}")
+                    else:
+                        findings_summary.append(f"- Resultado: {results[0]}")
+            elif finding.get('action_type') == 'python_eda' or finding.get('action_type') == 'eda_analysis':
+                # Se é resultado de Python EDA
+                if finding.get('insights'):
+                    for insight in finding.get('insights', []):
+                        # Se insight é string, adicionar diretamente
+                        if isinstance(insight, str):
+                            findings_summary.append(f"- {insight}")
+                        elif isinstance(insight, dict) and 'text' in insight:
+                            findings_summary.append(f"- {insight['text']}")
+                            
+                if finding.get('execution_results'):
+                    # Adicionar resultados específicos da execução
+                    results = finding.get('execution_results', {})
+                    if isinstance(results, dict):
+                        for key, value in results.items():
+                            if key not in ['plots', 'stdout', 'stderr']:  # Excluir dados não relevantes para síntese
+                                if isinstance(value, (int, float)):
+                                    findings_summary.append(f"- {key}: {value:.2f}" if isinstance(value, float) else f"- {key}: {value}")
+                                else:
+                                    findings_summary.append(f"- {key}: {value}")
+                    elif isinstance(results, list):
+                        for result in results[:10]:  # Limitar a 10 resultados
+                            if isinstance(result, dict):
+                                # Se tem estatísticas específicas, processar
+                                if any(key in result for key in ['Média', 'Mediana', 'Desvio Padrão']):
+                                    for key, value in result.items():
+                                        if key not in ['title', 'data', 'type']:
+                                            if isinstance(value, (int, float)):
+                                                findings_summary.append(f"- {key}: {value:.2f}" if isinstance(value, float) else f"- {key}: {value}")
+                                            else:
+                                                findings_summary.append(f"- {key}: {value}")
+                                elif 'title' in result:
+                                    findings_summary.append(f"- {result['title']}")
+                            else:
+                                findings_summary.append(f"- {str(result)}")
+            elif finding.get('findings'):
+                findings_summary.append(f"- {finding['findings']}")
+            elif finding.get('description'):
+                findings_summary.append(f"- {finding['description']}")
+    
+    findings_text = '\n'.join(findings_summary) if findings_summary else "Nenhum resultado específico encontrado"
+    
+    # Log de debug
+    if 'agent_logs' in st.session_state:
+        st.session_state['agent_logs'].append({
+            'timestamp': datetime.now().strftime('%H:%M:%S'),
+            'agent': 'synthesis',
+            'action': '📋 Preparando síntese final',
+            'details': f"Pergunta: {question}\nResultados: {findings_text[:200]}..."
+        })
+    
     synthesis_prompt = f"""
-    Sintetize os resultados da análise:
+    Responda de forma clara e direta a seguinte pergunta baseado nos resultados da análise:
 
-    PERGUNTA: {context['question'][:100]}
-    DESCOBERTAS: {len(context.get('findings', []))} etapas executadas
+    PERGUNTA: {question}
+    
+    RESULTADOS ENCONTRADOS:
+    {findings_text}
 
-    Forneça resposta direta em 2-3 frases.
+    Forneça resposta direta e objetiva.
     {"Mencione que foi gerada planilha Excel." if should_generate_excel else ""}
     """
     
@@ -3104,8 +3606,214 @@ def synthesize_final_results(llm, context: dict, config: dict) -> dict:
             "error": str(e)
         }
 
+def render_python_eda_results(eda_results: dict):
+    """Renderiza resultados da análise Python EDA"""
+    if not eda_results or not eda_results.get('success', False):
+        st.error(f"❌ Erro na análise: {eda_results.get('error', 'Erro desconhecido')}")
+        if eda_results.get('traceback'):
+            with st.expander("📋 Detalhes do erro", expanded=False):
+                st.code(eda_results['traceback'], language='python')
+        return
+    
+    st.markdown("### 📊 Resultados da Análise Exploratória (Python)")
+    
+    # Tabs para diferentes aspectos
+    tabs = st.tabs(["📈 Resultados", "🖼️ Visualizações", "💡 Insights", "📝 Saída", "🔧 Código"])
+    
+    with tabs[0]:  # Resultados
+        if eda_results.get('execution_results'):
+            st.markdown("**📊 Resultados da Execução:**")
+            for result in eda_results['execution_results']:
+                with st.expander(f"📋 {result.get('title', 'Resultado')}", expanded=True):
+                    data = result.get('data')
+                    if isinstance(data, pd.DataFrame):
+                        st.dataframe(data)
+                    elif isinstance(data, dict):
+                        st.json(data)
+                    else:
+                        st.write(data)
+        
+        if eda_results.get('tables_analyzed'):
+            st.info(f"📊 Tabelas analisadas: {', '.join(eda_results['tables_analyzed'])}")
+    
+    with tabs[1]:  # Visualizações
+        if eda_results.get('plots'):
+            st.markdown("**🖼️ Gráficos Gerados:**")
+            
+            # Organizar plots em colunas
+            num_plots = len(eda_results['plots'])
+            cols_per_row = 2
+            
+            for i in range(0, num_plots, cols_per_row):
+                cols = st.columns(cols_per_row)
+                for j in range(cols_per_row):
+                    if i + j < num_plots:
+                        plot = eda_results['plots'][i + j]
+                        with cols[j]:
+                            st.markdown(f"**{plot['title']}**")
+                            st.image(f"data:image/png;base64,{plot['image']}")
+        else:
+            st.info("ℹ️ Nenhuma visualização foi gerada")
+    
+    with tabs[2]:  # Insights
+        if eda_results.get('insights'):
+            st.markdown("**💡 Insights Descobertos:**")
+            
+            # Agrupar por categoria
+            insights_by_category = {}
+            for insight in eda_results['insights']:
+                category = insight.get('category', 'geral')
+                if category not in insights_by_category:
+                    insights_by_category[category] = []
+                insights_by_category[category].append(insight['text'])
+            
+            # Mostrar por categoria
+            for category, insights in insights_by_category.items():
+                with st.expander(f"📌 {category.title()} ({len(insights)} insights)", expanded=True):
+                    for idx, text in enumerate(insights, 1):
+                        st.write(f"{idx}. {text}")
+        else:
+            st.info("ℹ️ Nenhum insight específico foi identificado")
+    
+    with tabs[3]:  # Saída
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if eda_results.get('stdout'):
+                st.markdown("**📝 Saída do Console:**")
+                st.code(eda_results['stdout'], language='text')
+        
+        with col2:
+            if eda_results.get('stderr'):
+                st.markdown("**⚠️ Avisos:**")
+                st.code(eda_results['stderr'], language='text')
+    
+    with tabs[4]:  # Código
+        if eda_results.get('code'):
+            st.markdown("**🔧 Código Python Executado:**")
+            st.code(eda_results['code'], language='python')
+            
+            # Botão para copiar código
+            st.download_button(
+                label="📥 Baixar código",
+                data=eda_results['code'],
+                file_name=f"eda_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.py",
+                mime="text/plain"
+            )
+
+
+def render_eda_results(eda_results: dict):
+    """Renderiza resultados da análise exploratória de dados (versão antiga)"""
+    # Se for resultado da nova ferramenta Python, usar função específica
+    if eda_results.get('action_type') == 'python_eda':
+        return render_python_eda_results(eda_results)
+    
+    # Código original para EDA antiga
+    if not eda_results or not eda_results.get('success', False):
+        return
+    
+    st.markdown("### 📊 Resultados da Análise Exploratória")
+    
+    # Tabs para diferentes aspectos da análise
+    tabs = st.tabs(["📈 Estatísticas", "📊 Distribuições", "🔗 Correlações", "🎯 Outliers", "💡 Insights"])
+    
+    with tabs[0]:  # Estatísticas
+        for table_name, analysis in eda_results.get('analyses', {}).items():
+            if 'error' not in analysis:
+                with st.expander(f"📊 {table_name}", expanded=True):
+                    # Informações básicas
+                    if 'basic_info' in analysis:
+                        info = analysis['basic_info']
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("Total de Registros", f"{info['total_rows']:,}")
+                        with col2:
+                            st.metric("Total de Colunas", info['total_columns'])
+                        with col3:
+                            st.metric("Duplicatas", f"{info['duplicate_rows']:,}")
+                    
+                    # Estatísticas numéricas
+                    if 'numeric_stats' in analysis:
+                        st.markdown("**📊 Variáveis Numéricas:**")
+                        for col, stats in analysis['numeric_stats'].items():
+                            with st.expander(f"📈 {col}"):
+                                col1, col2, col3, col4 = st.columns(4)
+                                with col1:
+                                    st.metric("Média", f"{stats['mean']:.2f}")
+                                with col2:
+                                    st.metric("Mediana", f"{stats['median']:.2f}")
+                                with col3:
+                                    st.metric("Desvio Padrão", f"{stats['std']:.2f}")
+                                with col4:
+                                    st.metric("Valores Únicos", stats['unique_values'])
+    
+    with tabs[1]:  # Distribuições
+        if 'visualizations' in eda_results:
+            for viz in eda_results['visualizations']:
+                if viz['type'] == 'histograms':
+                    st.markdown(f"**📊 {viz['description']}**")
+                    st.info(f"Colunas disponíveis: {', '.join(viz['columns'])}")
+    
+    with tabs[2]:  # Correlações
+        for table_name, analysis in eda_results.get('analyses', {}).items():
+            if 'correlations' in analysis and 'strong_correlations' in analysis['correlations']:
+                correlations = analysis['correlations']['strong_correlations']
+                if correlations:
+                    st.markdown(f"**🔗 Correlações Fortes em {table_name}:**")
+                    for corr in correlations:
+                        st.write(f"• {corr['var1']} ↔️ {corr['var2']}: {corr['correlation']:.3f}")
+    
+    with tabs[3]:  # Outliers
+        for table_name, analysis in eda_results.get('analyses', {}).items():
+            if 'outliers' in analysis:
+                st.markdown(f"**🎯 Outliers em {table_name}:**")
+                outliers_data = []
+                for col, info in analysis['outliers'].items():
+                    if isinstance(info, dict) and info.get('outlier_count', 0) > 0:
+                        outliers_data.append({
+                            'Coluna': col,
+                            'Outliers': info['outlier_count'],
+                            'Percentual': f"{info['outlier_percentage']:.1f}%"
+                        })
+                if outliers_data:
+                    st.dataframe(pd.DataFrame(outliers_data), use_container_width=True, hide_index=True)
+    
+    with tabs[4]:  # Insights
+        if 'insights' in eda_results:
+            st.markdown("**💡 Principais Insights:**")
+            for insight in eda_results['insights']:
+                st.write(insight)
+        
+        if 'recommendations' in eda_results:
+            st.markdown("**🎯 Recomendações:**")
+            for table_name, analysis in eda_results.get('analyses', {}).items():
+                if 'recommendations' in analysis:
+                    for rec in analysis['recommendations']:
+                        st.write(rec)
+
 def render_analysis_step(step: dict, show_reasoning: bool):
     """Renderiza uma etapa da análise"""
+    
+    # Renderizar resultados EDA se existirem
+    result = step.get('result', {})
+    if isinstance(result, dict) and result.get('action_type') == 'eda_analysis':
+        # Se foi sucesso, renderizar resultados EDA especiais
+        if result.get('success', False):
+            render_eda_results(result)
+            return
+        # Se teve erro real (não None), continuar para mostrar erro abaixo
+        elif result.get('error') and result['error'] != 'None':
+            pass  # Continuar para renderização padrão com erro
+        else:
+            # Sucesso mas sem renderização especial ou erro None - mostrar como sucesso
+            with st.container():
+                st.markdown(f"### 🔍 Etapa {step['step']}: {step['action']}")
+                st.markdown(f"**Descrição:** {step['description']}")
+                st.success("✅ Análise EDA concluída com sucesso!")
+                if result.get('findings'):
+                    st.info(f"**Descobertas:** {result['findings']}")
+                st.markdown("---")
+            return
     
     # Usar container em vez de expander para evitar aninhamento
     with st.container():
@@ -3190,7 +3898,7 @@ def render_analysis_step(step: dict, show_reasoning: bool):
                         st.markdown(f"- {insight}")
             
             # Mostrar erros se existirem
-            if 'error' in result:
+            if 'error' in result and result['error'] and result['error'] != 'None':
                 st.error(f"❌ **Erro:** {result['error']}")
             
             # Mostrar findings de forma destacada
@@ -3221,4 +3929,4 @@ def save_agent_analysis(question: str, steps: list, config: dict, iterations: in
     if len(st.session_state['agent_analyses']) > 10:
         st.session_state['agent_analyses'] = st.session_state['agent_analyses'][-10:]
 
-# Atualiza��o for�ada 09/18/2025 20:54:55
+# Atualiza��o for�ada 09/18/2025 20:54:55

@@ -17,8 +17,8 @@ from src.ui.pages import upload, processing, calculations, reports, prompts_mana
 
 # Configuração da página
 st.set_page_config(
-    page_title="💳 Sistema de Vale Refeição IA",
-    page_icon="🍽️",
+    page_title="Sistema de Agente de IA",
+    page_icon="🤖",
     layout="wide",
     initial_sidebar_state="collapsed"  # Mudado para collapsed já que temos navegação customizada
 )

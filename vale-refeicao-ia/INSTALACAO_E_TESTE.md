@@ -4,9 +4,9 @@
 
 Certifique-se de ter instalado:
 - ✅ Python 3.11 ou superior
-- ✅ PostgreSQL 14 ou superior
+- ✅ SQLite (incluído no Python) ou PostgreSQL 14+
 - ✅ Git
-- ✅ Docker (opcional, mas recomendado)
+- ✅ Até 2GB de RAM disponível para análises grandes
 
 ## 🔧 Instalação Passo a Passo
 
@@ -37,12 +37,32 @@ source venv/bin/activate
 ### 3. Instale as Dependências
 
 ```bash
-pip install -r requirements.txt
+# Instale todas as dependências incluindo bibliotecas de visualização
+pip install -r requirements-working.txt
+
+# Ou se preferir instalar individualmente:
+pip install streamlit pandas numpy sqlalchemy
+pip install openai llama-index matplotlib seaborn
+pip install xlsxwriter openpyxl
 ```
 
 ### 4. Configure o Banco de Dados
 
-#### Opção A: Usando Docker (Recomendado) 🐳
+#### Opção A: SQLite (Recomendado para Teste) 📦
+
+```bash
+# Windows PowerShell
+.\configurar_sqlite.ps1
+
+# Windows CMD
+configurar_sqlite.bat
+
+# Ou crie manualmente o arquivo .env:
+echo "DATABASE_URL=sqlite:///./vale_refeicao.db" > .env
+echo "OPENAI_API_KEY=sk-sua-chave-aqui" >> .env
+```
+
+#### Opção B: Usando Docker (PostgreSQL) 🐳
 
 ```bash
 # Inicie o PostgreSQL e ChromaDB com Docker Compose
@@ -108,45 +128,91 @@ python -c "from src.data.models import Base, engine; Base.metadata.create_all(en
 ### 1. Inicie o Streamlit
 
 ```bash
+# Certifique-se que o ambiente virtual está ativo
 streamlit run app.py
 ```
 
 A aplicação abrirá automaticamente em: http://localhost:8501
 
+#### 🔄 Como Reiniciar Após Mudanças:
+```bash
+# 1. No terminal onde o Streamlit está rodando:
+Ctrl + C  # Para o servidor
+
+# 2. Inicie novamente:
+streamlit run app.py
+
+# Ou use auto-reload para desenvolvimento:
+streamlit run app.py --server.runOnSave true
+```
+
 ### 2. Prepare Arquivos de Teste
 
-Crie planilhas Excel de teste com as seguintes colunas:
-- **MATRICULA** (obrigatório - chave de unificação)
+#### Para Vale Refeição:
+Crie planilhas Excel/CSV com colunas como:
+- **MATRICULA** (ou escolha outra coluna como índice)
 - **NOME**
-- **CPF**
-- **DEPARTAMENTO**
+- **SINDICATO**
 - **DATA_ADMISSAO**
-- **SALARIO**
-- **DIAS_TRABALHADOS**
+- **STATUS**
+
+#### Para Análise Exploratória (Qualquer Dataset):
+- **Vendas**: produto, quantidade, preço, data, categoria
+- **Clientes**: id, idade, cidade, renda, score
+- **Estoque**: sku, quantidade, custo, fornecedor
+- **Qualquer CSV**: O sistema se adapta automaticamente
 
 ### 3. Fluxo de Teste Completo
 
+#### ⚠️ IMPORTANTE: O sistema tem 2 etapas separadas!
+
+1. **Upload** → Apenas carrega arquivos na memória
+2. **Preparação de Dados** → Salva no banco de dados
+
 #### Passo 1: Upload de Arquivos
-1. Acesse a página de Upload
-2. Arraste ou selecione múltiplas planilhas
-3. Clique em "Processar Arquivos"
+1. Acesse a página "📤 Upload"
+2. Arraste ou selecione arquivos (até 500MB)
+3. Para cada arquivo:
+   - Marque "Definir coluna de indexação" (opcional)
+   - Escolha a coluna desejada como chave primária
+4. **IMPORTANTE**: Após upload, vá para "🔄 Preparação de Dados" no menu lateral
 
-#### Passo 2: Processamento
-1. O sistema detectará automaticamente as colunas
-2. O Extraction Agent limpará e validará os dados
-3. Verifique o relatório de processamento
+#### Passo 2: Preparação de Dados (OBRIGATÓRIO!)
+1. Acesse a página "🔄 Preparação de Dados" 
+2. Clique em "Iniciar Processamento"
+3. Aguarde o agente:
+   - Limpar dados
+   - Criar tabelas no banco
+   - Salvar registros
+4. Só após isso os dados estarão disponíveis
 
-#### Passo 3: Cálculos
-1. Vá para a página de Cálculos
-2. Configure:
-   - Mês de referência
-   - Valor por dia útil
-   - Percentual de desconto
-3. Clique em "Calcular Vale Refeição"
+#### Passo 3: Análise Exploratória de Dados (NOVO!)
+1. Vá para "Banco de Dados" → "Buscas (Query)"
+2. Na aba "Agente Autônomo", digite:
+   - "Faça uma análise exploratória completa dos dados"
+   - "Identifique outliers e correlações"
+   - "Mostre estatísticas e distribuições"
+3. Visualize os resultados em 5 abas:
+   - 📈 Estatísticas
+   - 📊 Distribuições
+   - 🔗 Correlações
+   - 🎯 Outliers
+   - 💡 Insights
 
-#### Passo 4: Relatórios
-1. Acesse a página de Relatórios
-2. Visualize:
+#### Passo 4: Agentes de IA
+1. Vá para "Agentes de IA"
+2. Configure uma nova análise:
+   - Nome: "Análise Completa EDA"
+   - Ferramentas: Marque "📊 Análise Exploratória (EDA)"
+   - Prompt: Descreva sua análise desejada
+3. Execute e acompanhe em tempo real
+
+#### Passo 5: Exportação e Relatórios
+1. Os resultados incluem:
+   - Estatísticas completas
+   - Gráficos (quando solicitados)
+   - Recomendações automáticas
+2. Exporte para Excel com todas as análises
    - Resumo por departamento
    - Distribuição de valores
    - Estatísticas gerais
@@ -209,6 +275,46 @@ MATRICULA,NOME,CPF,DEPARTAMENTO,DATA_ADMISSAO,SALARIO,DIAS_TRABALHADOS
 1003,Pedro Oliveira,456.789.123-00,Vendas,2023-03-10,3800.00,22
 ```
 
+## 🆕 Novos Recursos de Análise Exploratória
+
+### 📊 Análises Disponíveis
+
+1. **Estatísticas Descritivas**
+   - Média, mediana, desvio padrão
+   - Quartis e percentis
+   - Valores mínimos e máximos
+
+2. **Análise de Distribuições**
+   - Detecção de normalidade
+   - Assimetria (skewness) e curtose
+   - Recomendações de transformação
+
+3. **Detecção de Outliers**
+   - Método IQR automático
+   - Contagem e percentual por coluna
+   - Valores específicos identificados
+
+4. **Análise de Correlações**
+   - Matriz completa de correlações
+   - Identificação de pares fortemente correlacionados
+   - Visualização em heatmap (quando solicitado)
+
+5. **Valores Ausentes**
+   - Contagem por coluna
+   - Padrões de ausência
+   - Recomendações de tratamento
+
+### 🎯 Exemplos de Perguntas para o Agente
+
+```
+"Análise completa da tabela vendas"
+"Quais colunas têm outliers?"
+"Mostre as correlações entre preço e quantidade"
+"Identifique padrões temporais nos dados"
+"Quais variáveis têm distribuição normal?"
+"Detecte anomalias no dataset"
+```
+
 ## 🔍 Verificação de Saúde
 
 Execute este script para verificar se tudo está funcionando:
@@ -217,9 +323,11 @@ Execute este script para verificar se tudo está funcionando:
 # test_health.py
 import os
 from dotenv import load_dotenv
-import psycopg2
+import sqlalchemy
 import openai
-import chromadb
+import pandas as pd
+import matplotlib
+import seaborn
 
 load_dotenv()
 
@@ -229,31 +337,31 @@ assert os.getenv("OPENAI_API_KEY"), "❌ OPENAI_API_KEY não configurada"
 assert os.getenv("DATABASE_URL"), "❌ DATABASE_URL não configurada"
 print("✅ Variáveis OK")
 
-# Teste 2: PostgreSQL
-print("\n✅ Teste 2: PostgreSQL")
+# Teste 2: Banco de Dados
+print("\n✅ Teste 2: Banco de Dados")
 try:
-    conn = psycopg2.connect(os.getenv("DATABASE_URL"))
-    conn.close()
-    print("✅ PostgreSQL OK")
+    engine = sqlalchemy.create_engine(os.getenv("DATABASE_URL"))
+    engine.connect()
+    print("✅ Banco de Dados OK")
 except Exception as e:
-    print(f"❌ PostgreSQL Error: {e}")
+    print(f"❌ Database Error: {e}")
 
 # Teste 3: OpenAI
 print("\n✅ Teste 3: OpenAI")
 try:
     openai.api_key = os.getenv("OPENAI_API_KEY")
-    # Teste simples sem gastar tokens
     print("✅ OpenAI configurada")
 except Exception as e:
     print(f"❌ OpenAI Error: {e}")
 
-# Teste 4: ChromaDB
-print("\n✅ Teste 4: ChromaDB")
+# Teste 4: Bibliotecas de Análise
+print("\n✅ Teste 4: Bibliotecas de Análise")
 try:
-    client = chromadb.Client()
-    print("✅ ChromaDB OK")
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    print("✅ Matplotlib e Seaborn OK")
 except Exception as e:
-    print(f"❌ ChromaDB Error: {e}")
+    print(f"❌ Visualization Error: {e}")
 
 print("\n🎉 Todos os testes passaram! A aplicação está pronta para uso.")
 ```

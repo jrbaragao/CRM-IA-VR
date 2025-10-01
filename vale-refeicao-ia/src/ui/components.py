@@ -13,8 +13,8 @@ def render_header():
     """Renderiza o header principal da aplicação"""
     st.markdown("""
     <div class="main-header">
-        <h1>💳 Sistema de Vale Refeição com IA</h1>
-        <p>Processamento inteligente de dados de RH com LlamaIndex</p>
+        <h1>🤖 Sistema de Agente de IA</h1>
+        <p>Processamento inteligente de dados</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -120,6 +120,16 @@ def render_realtime_logs():
                         if isinstance(details, dict):
                             for key, value in details.items():
                                 st.caption(f"└─ {key}: {value}")
+                        else:
+                            # Se for string, mostrar direto
+                            # Dividir em linhas se for muito longo
+                            details_str = str(details)
+                            if len(details_str) > 200:
+                                # Mostrar em expander se for muito longo
+                                with st.expander("📋 Ver detalhes", expanded=False):
+                                    st.code(details_str, language=None)
+                            else:
+                                st.caption(f"└─ {details_str}")
     
     # Botão para limpar logs
     if st.button("🗑️ Limpar Logs", key="clear_logs_sidebar"):
@@ -164,12 +174,12 @@ def _render_navigation_content() -> str:
     # Menu de navegação
     pages = {
         'upload': '📤 Upload de Dados',
-        'processing': '🔄 Processamento',
+        'processing': '🔄 Preparação de Dados',
         'database': '🗃️ Banco de Dados',
-        'calculations': '🧮 Cálculos VR',
+        'calculations': '🤖 Agentes de IA',
         'reports': '📊 Relatórios',
         'prompts': '🎯 Gerenciar Prompts',
-        'monitor': '🤖 Monitor de Agentes'
+        'monitor': '📡 Monitor de Agentes'
     }
     
     # Seleção de página

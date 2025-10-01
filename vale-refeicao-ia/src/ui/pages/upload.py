@@ -19,6 +19,18 @@ from ...config.settings import settings
 def render():
     """Renderiza página de upload"""
     st.header("📤 Upload de Dados")
+    
+    # Mostrar o fluxo completo com destaque visual
+    st.markdown("""
+    ### 📋 Fluxo do Sistema:
+    <div style='background-color: #e6f3ff; padding: 15px; border-radius: 10px; margin-bottom: 20px;'>
+        <b>1. 📤 Upload</b> <span style='color: #667eea;'>(VOCÊ ESTÁ AQUI)</span> → 
+        2. 🔄 Preparação de Dados → 
+        3. 🗃️ Banco de Dados → 
+        4. 🤖 Agentes de IA
+    </div>
+    """, unsafe_allow_html=True)
+    
     st.markdown("""
     Faça o upload das suas planilhas de dados. O sistema criará **tabelas dinâmicas** 
     automaticamente e os **agentes autônomos** identificarão as correlações através 
@@ -64,12 +76,45 @@ def render():
         st.divider()
         display_uploaded_files()
         
-        # Botão para prosseguir
-        col1, col2, col3 = st.columns([1, 1, 1])
-        with col2:
-            if st.button("🚀 Processar Arquivos", type="primary", use_container_width=True):
-                st.session_state['current_page'] = 'processing'
-                st.rerun()
+        # Informações sobre próximos passos
+        st.divider()
+        
+        # Criar um alerta visual mais claro
+        st.success("✅ **Arquivos carregados com sucesso!**")
+        
+        # Instruções claras com destaque visual
+        with st.container():
+            st.markdown("""
+            ### 🎯 **Próximo Passo Obrigatório:**
+            
+            <div style='background-color: #f0f2f6; padding: 20px; border-radius: 10px; border-left: 5px solid #667eea; position: relative;'>
+                <div style='position: absolute; left: -40px; top: 50%; transform: translateY(-50%); font-size: 30px; animation: bounce 2s infinite;'>
+                    ⬅️
+                </div>
+                <h4>👉 Clique em <b>"🔄 Preparação de Dados"</b> no menu lateral</h4>
+                <p style='color: #666; margin: 5px 0;'>O menu está à esquerda da tela</p>
+                <p style='color: #d73502; font-weight: bold; margin: 10px 0 0 0;'>
+                    ⚠️ Não use os botões do navegador! Use o menu lateral do Streamlit.
+                </p>
+            </div>
+            
+            <style>
+                @keyframes bounce {
+                    0%, 100% { transform: translateY(-50%) translateX(0); }
+                    50% { transform: translateY(-50%) translateX(-10px); }
+                }
+            </style>
+            """, unsafe_allow_html=True)
+            
+            st.markdown("""
+            #### O que acontecerá na próxima página:
+            - 🤖 O agente de IA processará e limpará os dados
+            - 🏗️ Criará tabelas dinâmicas no banco de dados
+            - 📊 Salvará permanentemente os dados
+            - 📈 Você verá logs em tempo real
+            
+            > **⚠️ Importante**: Os dados ainda NÃO foram salvos no banco. Você DEVE ir para "Preparação de Dados" para completar o processo.
+            """)
 
 def process_uploaded_files(files):
     """Processa todos os arquivos enviados"""
@@ -80,7 +125,10 @@ def process_uploaded_files(files):
         for i, file in enumerate(files):
             # Ler arquivo
             if file.name.endswith('.csv'):
-                df = pd.read_csv(file)
+                # Ler CSV com tratamento especial para aspas
+                df = pd.read_csv(file, quotechar='"', skipinitialspace=True)
+                # Remover aspas dos nomes das colunas se houver
+                df.columns = df.columns.str.strip('"').str.strip()
             else:
                 df = pd.read_excel(file)
             
@@ -97,16 +145,45 @@ def process_uploaded_files(files):
                 'type': 'data',  # Todos são dados agora
                 'uploaded_at': datetime.now(),
                 'rows': len(df),
-                'columns': len(df.columns)
+                'columns': len(df.columns),
+                'index_column': None  # Coluna de indexação
             }
         
         st.success(f"✅ {len(files)} arquivo(s) carregado(s) com sucesso!")
         
-        # Preview dos arquivos
+        # Preview e configuração dos arquivos
         for file_key, file_info in st.session_state['uploaded_files'].items():
             if file_key.startswith('file_'):
                 with st.expander(f"📊 {file_info['name']} ({file_info['rows']} linhas, {file_info['columns']} colunas)", expanded=False):
+                    # Preview dos dados
                     st.dataframe(file_info['data'].head(), use_container_width=True)
+                    
+                    # Seleção de coluna de indexação
+                    st.divider()
+                    col1, col2 = st.columns([1, 1])
+                    
+                    with col1:
+                        st.markdown("**🔑 Configuração de Indexação**")
+                        use_index = st.checkbox(
+                            "Definir coluna de indexação",
+                            key=f"use_index_{file_key}",
+                            help="Marque se deseja definir uma coluna como chave primária/índice para correlação entre tabelas"
+                        )
+                    
+                    with col2:
+                        if use_index:
+                            columns = list(file_info['data'].columns)
+                            index_col = st.selectbox(
+                                "Selecione a coluna de indexação:",
+                                options=[''] + columns,
+                                key=f"index_{file_key}",
+                                help="Esta coluna será usada como chave primária para relacionar com outras tabelas"
+                            )
+                            
+                            # Atualizar no session state
+                            if index_col:
+                                st.session_state['uploaded_files'][file_key]['index_column'] = index_col
+                                st.info(f"✅ Coluna '{index_col}' definida como índice")
         
     except Exception as e:
         st.error(f"❌ Erro ao processar arquivos: {str(e)}")
@@ -171,7 +248,10 @@ def process_complementary_files(files):
         try:
             # Ler arquivo
             if file.name.endswith('.csv'):
-                df = pd.read_csv(file)
+                # Ler CSV com tratamento especial para aspas
+                df = pd.read_csv(file, quotechar='"', skipinitialspace=True)
+                # Remover aspas dos nomes das colunas se houver
+                df.columns = df.columns.str.strip('"').str.strip()
             else:
                 df = pd.read_excel(file)
             
@@ -221,7 +301,10 @@ def process_batch_files(files):
             
             # Ler arquivo
             if file.name.endswith('.csv'):
-                df = pd.read_csv(file)
+                # Ler CSV com tratamento especial para aspas
+                df = pd.read_csv(file, quotechar='"', skipinitialspace=True)
+                # Remover aspas dos nomes das colunas se houver
+                df.columns = df.columns.str.strip('"').str.strip()
             else:
                 df = pd.read_excel(file)
             

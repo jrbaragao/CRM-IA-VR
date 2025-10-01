@@ -45,8 +45,8 @@ class DatabaseManager:
             # Criar tabela de configurações de cálculo
             self._create_calculation_configs_table()
             
-            # Criar configuração padrão se não existir
-            self._create_default_calculation_config()
+            # Não criar mais configuração padrão automaticamente
+            # self._create_default_calculation_config()
             
             # Remover tabelas antigas se existirem
             self._cleanup_old_tables()
@@ -176,16 +176,69 @@ class DatabaseManager:
             df_clean['updated_at'] = datetime.utcnow()
             
             # Salvar no banco usando pandas to_sql
-            rows_saved = df_clean.to_sql(
-                name=table_name,
-                con=self.engine,
-                if_exists=if_exists,
-                index=False,
-                method='multi'
-            )
+            # Para SQLite, precisamos considerar o limite de variáveis (999)
+            # Com 33 colunas, podemos processar no máximo ~30 linhas por vez
+            num_columns = len(df_clean.columns)
+            max_params = 999
+            rows_per_chunk = max(1, min(max_params // num_columns - 1, 100))
             
-            st.success(f"✅ {len(df_clean)} registros salvos na tabela '{table_name}'!")
-            return len(df_clean)
+            # Se temos muitas linhas, usar chunks menores
+            if len(df_clean) > rows_per_chunk:
+                chunksize = rows_per_chunk
+            else:
+                chunksize = None
+            
+            st.info(f"📊 Salvando {len(df_clean)} registros na tabela '{table_name}'...")
+            if chunksize:
+                st.info(f"📦 Processando em lotes de {chunksize} registros por vez...")
+                
+                # Salvar com progresso manual para grandes datasets
+                progress_bar = st.progress(0)
+                progress_text = st.empty()
+                
+                # Dividir o dataframe em chunks e salvar
+                total_saved = 0
+                for i in range(0, len(df_clean), chunksize):
+                    chunk = df_clean.iloc[i:i + chunksize]
+                    chunk.to_sql(
+                        name=table_name,
+                        con=self.engine,
+                        if_exists='append' if i > 0 else if_exists,
+                        index=False,
+                        method='multi'
+                    )
+                    total_saved += len(chunk)
+                    progress = total_saved / len(df_clean)
+                    progress_bar.progress(progress)
+                    progress_text.text(f"Salvando... {total_saved}/{len(df_clean)} registros")
+                
+                progress_bar.empty()
+                progress_text.empty()
+                rows_saved = total_saved
+            else:
+                # Dataset pequeno, salvar de uma vez
+                rows_saved = df_clean.to_sql(
+                    name=table_name,
+                    con=self.engine,
+                    if_exists=if_exists,
+                    index=False,
+                    method='multi'
+                )
+            
+            # Verificar se os dados foram realmente salvos
+            try:
+                with self.engine.connect() as conn:
+                    # Usar text() do SQLAlchemy para executar SQL bruto
+                    from sqlalchemy import text
+                    query = text(f'SELECT COUNT(*) FROM "{table_name}"')
+                    result = conn.execute(query)
+                    actual_count = result.scalar()
+            except Exception as count_error:
+                st.warning(f"⚠️ Não foi possível verificar contagem: {str(count_error)}")
+                actual_count = len(df_clean)
+            
+            st.success(f"✅ {actual_count} registros salvos na tabela '{table_name}'!")
+            return actual_count
             
         except Exception as e:
             st.error(f"❌ Erro ao salvar dados na tabela '{table_name}': {str(e)}")
@@ -418,7 +471,7 @@ class DatabaseManager:
             st.error(f"❌ Erro ao registrar importação: {str(e)}")
             raise
     
-    def log_agent_action(self, agent_name: str, action: str, input_data: dict = None, 
+    def log_to_session(self, agent_name: str, action: str, input_data: dict = None, 
                         output_data: dict = None, status: str = "success", 
                         error_message: str = None) -> int:
         """
@@ -474,9 +527,9 @@ class DatabaseManager:
             )
             """
             
-            with self.engine.connect() as conn:
+            with self.engine.begin() as conn:
                 conn.execute(text(create_table_sql))
-                conn.commit()
+                # Commit automático com begin()
                 
         except Exception as e:
             st.error(f"Erro ao criar tabela de configurações de cálculo: {str(e)}")
@@ -487,17 +540,81 @@ class DatabaseManager:
         try:
             import json
             
+            # Função local de log para evitar import circular
+            def log_to_session(agent: str, action: str, details: dict = None):
+                """Log local para session state"""
+                if 'agent_logs' not in st.session_state:
+                    st.session_state.agent_logs = []
+                
+                log_entry = {
+                    'timestamp': datetime.now().strftime('%H:%M:%S'),
+                    'agent': agent,
+                    'action': action,
+                    'details': details or {}
+                }
+                st.session_state.agent_logs.append(log_entry)
+            
+            # Log inicial
+            log_to_session(
+                "config_manager",
+                f"🔧 Iniciando salvamento de configuração: {name}",
+                {
+                    "nome": name,
+                    "ferramentas": len(available_tools),
+                    "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                }
+            )
+            
+            # Verificar se a tabela existe
+            with self.engine.connect() as conn:
+                check_table_sql = """
+                SELECT name FROM sqlite_master 
+                WHERE type='table' AND name='calculation_configs'
+                """
+                result = conn.execute(text(check_table_sql))
+                table_exists = result.fetchone()
+                
+                if not table_exists:
+                    st.warning("⚠️ Tabela calculation_configs não existe. Criando...")
+                    log_to_session(
+                        "config_manager",
+                        "📋 Criando tabela calculation_configs",
+                        {"status": "criando"}
+                    )
+                    conn.close()  # Fechar conexão antes de criar tabela
+                    self._create_calculation_configs_table()
+                    st.success("✅ Tabela calculation_configs criada com sucesso!")
+                    log_to_session(
+                        "config_manager",
+                        "✅ Tabela calculation_configs criada",
+                        {"status": "criada"}
+                    )
+                else:
+                    st.caption("✅ Tabela calculation_configs já existe.")
+                    log_to_session(
+                        "config_manager",
+                        "✅ Tabela calculation_configs encontrada",
+                        {"status": "existe"}
+                    )
+            
             # Preparar dados
             tools_json = json.dumps(available_tools)
             
             # Verificar se já existe
             check_sql = "SELECT id FROM calculation_configs WHERE name = :name"
             
-            with self.engine.connect() as conn:
+            # Usar begin() para transação explícita
+            with self.engine.begin() as conn:
                 result = conn.execute(text(check_sql), {"name": name}).fetchone()
                 
                 if result:
                     # Atualizar existente
+                    log_to_session(
+                        "config_manager",
+                        f"📝 Atualizando configuração existente: {name}",
+                        {"id": result[0], "acao": "update"}
+                    )
+                    
                     update_sql = """
                     UPDATE calculation_configs 
                     SET description = :description, prompt = :prompt, 
@@ -517,17 +634,29 @@ class DatabaseManager:
                         "insights": config.get('include_insights', True),
                         "reasoning": config.get('show_reasoning', True)
                     })
+                    
+                    log_to_session(
+                        "config_manager",
+                        "✅ Configuração atualizada com sucesso",
+                        {"nome": name, "acao": "update_complete"}
+                    )
                 else:
                     # Inserir novo
+                    log_to_session(
+                        "config_manager",
+                        f"➕ Criando nova configuração: {name}",
+                        {"acao": "insert"}
+                    )
+                    
                     insert_sql = """
                     INSERT INTO calculation_configs 
                     (name, description, prompt, available_tools, max_iterations,
-                     exploration_depth, include_insights, show_reasoning)
+                     exploration_depth, include_insights, show_reasoning, is_active)
                     VALUES (:name, :description, :prompt, :tools, :max_iter,
-                            :depth, :insights, :reasoning)
+                            :depth, :insights, :reasoning, 1)
                     """
                     
-                    conn.execute(text(insert_sql), {
+                    params = {
                         "name": name,
                         "description": description,
                         "prompt": prompt,
@@ -536,13 +665,79 @@ class DatabaseManager:
                         "depth": config.get('exploration_depth', 'Intermediária'),
                         "insights": config.get('include_insights', True),
                         "reasoning": config.get('show_reasoning', True)
-                    })
+                    }
+                    
+                    log_to_session(
+                        "config_manager",
+                        "🔍 Parâmetros da inserção",
+                        {"params": str(params)[:200] + "..."}
+                    )
+                    
+                    conn.execute(text(insert_sql), params)
+                    
+                    log_to_session(
+                        "config_manager",
+                        "✅ Inserção executada",
+                        {"nome": name, "acao": "insert_complete"}
+                    )
                 
-                conn.commit()
-                return True
+                # Commit automático com begin()
+                log_to_session(
+                    "config_manager",
+                    "💾 Commit automático da transação",
+                    {"status": "commit_auto"}
+                )
+                
+            # Verificar se foi salvo em nova conexão
+            log_to_session(
+                "config_manager",
+                "🔍 Verificando se a configuração foi salva",
+                {"nome": name}
+            )
+            
+            with self.engine.connect() as conn:
+                verify_sql = "SELECT COUNT(*) FROM calculation_configs WHERE name = :name"
+                result = conn.execute(text(verify_sql), {"name": name})
+                count = result.scalar()
+                
+                log_to_session(
+                    "config_manager",
+                    f"📊 Resultado da verificação: {count} registro(s)",
+                    {"nome": name, "count": count}
+                )
+                
+                if count > 0:
+                    st.info(f"✅ Configuração '{name}' verificada no banco de dados.")
+                    log_to_session(
+                        "config_manager",
+                        f"✅ SUCESSO: Configuração '{name}' salva com sucesso!",
+                        {"nome": name, "status": "success"}
+                    )
+                    return True
+                else:
+                    st.error(f"❌ Configuração '{name}' não foi encontrada após salvar.")
+                    log_to_session(
+                        "config_manager",
+                        f"❌ ERRO: Configuração '{name}' não foi encontrada!",
+                        {"nome": name, "status": "error"}
+                    )
+                    return False
                 
         except Exception as e:
-            st.error(f"Erro ao salvar configuração de cálculo: {str(e)}")
+            st.error(f"❌ Erro ao salvar configuração de cálculo: {str(e)}")
+            import traceback
+            error_details = traceback.format_exc()
+            st.error(f"Detalhes: {error_details}")
+            
+            log_to_session(
+                "config_manager",
+                f"❌ ERRO CRÍTICO ao salvar configuração",
+                {
+                    "nome": name,
+                    "erro": str(e),
+                    "traceback": error_details[:500]
+                }
+            )
             return False
     
     def get_calculation_configs(self) -> list:
@@ -553,7 +748,7 @@ class DatabaseManager:
                    max_iterations, exploration_depth, include_insights, 
                    show_reasoning, created_at, updated_at, is_active
             FROM calculation_configs 
-            WHERE is_active = TRUE
+            WHERE is_active = TRUE OR is_active IS NULL
             ORDER BY name
             """
             

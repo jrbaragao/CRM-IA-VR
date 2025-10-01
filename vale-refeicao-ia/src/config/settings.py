@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     """Configurações da aplicação"""
     
     # Configurações gerais
-    app_name: str = "Sistema de Vale Refeição IA"
+    app_name: str = "Sistema de Agente de IA"
     app_version: str = "1.0.0"
     debug: bool = Field(default=False, env="DEBUG")
     

@@ -7,14 +7,16 @@ Sistema revolucionário de análise de dados baseado em **Agentes de IA Autônom
 ### 🧠 **Agentes de IA Autônomos**
 - **🔍 Agente de Consulta**: Converte linguagem natural em SQL inteligente
 - **🧮 Agente de Cálculo**: Executa cálculos complexos baseados em prompts configuráveis
-- **💰 Tool Vale Refeição**: Cálculo especializado com regras de negócio brasileiras (detalhado abaixo)
-- **📊 Agente de Análise**: Realiza análises multi-etapas com raciocínio transparente
+- **📊 Agente de Análise Exploratória (EDA)**: Análise estatística completa de qualquer dataset
+- **💰 Tool Vale Refeição**: Cálculo especializado com regras de negócio brasileiras
+- **📈 Agente de Análise**: Realiza análises multi-etapas com raciocínio transparente
 - **🔄 Processo Iterativo**: Agentes executam múltiplas etapas até completar objetivos
 
 ### 📊 **Tabelas Dinâmicas Inteligentes**
 - **🚀 Criação Automática**: Cada arquivo gera sua própria tabela no banco
 - **🔗 Correlações Inteligentes**: Agentes identificam relações entre dados via prompts
-- **🔑 Chaves Primárias Configuráveis**: Sistema sugere e permite configurar PKs
+- **🔑 Chaves Primárias Configuráveis**: Seleção de índice personalizado no upload
+- **🎯 Indexação Flexível**: Escolha qualquer coluna como chave primária
 - **⚡ Performance Otimizada**: Estrutura adaptada aos dados reais
 
 ### 🎯 **Prompts Configuráveis**
@@ -28,6 +30,57 @@ Sistema revolucionário de análise de dados baseado em **Agentes de IA Autônom
 - **🧠 Consulta Autônoma**: Agente executa múltiplas etapas para responder perguntas complexas
 - **📊 SQL Avançado**: Editor completo com validação e execução segura
 - **📈 Resultados Dinâmicos**: Visualização sem recarregamento de página
+
+### 💻 **Sistema de Geração de Código Python**
+
+#### 📝 **Dois Tipos de Código nos Logs**
+
+Quando você executa uma análise EDA, o sistema mostra dois códigos diferentes nos logs laterais:
+
+1. **🎯 Código LLM Gerado (Real)**
+   ```python
+   # Código PURO do GPT-4
+   # Exatamente como foi gerado
+   media = creditcard['AMOUNT'].mean()
+   mediana = creditcard['AMOUNT'].median()
+   ```
+   - **O que é**: Código original criado pelo LLM
+   - **Quando aparece**: Logo após a geração
+   - **Utilidade**: Debug e transparência
+
+2. **💻 Código Final Executado**
+   ```python
+   # DataFrame disponível
+   df = creditcard
+   
+   # Código do LLM aqui...
+   media = creditcard['AMOUNT'].mean()
+   
+   # Garantir resultado
+   if not execution_results:
+       insights.append("Análise concluída")
+   ```
+   - **O que é**: Código processado e seguro
+   - **Adições automáticas**: 
+     - Acesso ao DataFrame
+     - Inicializações necessárias
+     - Garantia de resultado
+   - **Utilidade**: Ver exatamente o que foi executado
+
+#### 🔄 **Fluxo de Processamento**
+```
+1. Pergunta do usuário → LLM gera código específico
+2. Validação de segurança (bloqueia exec, eval, etc.)
+3. Adição de boilerplate necessário
+4. Execução em ambiente sandbox seguro
+5. Captura e exibição dos resultados
+```
+
+#### 🔍 **Recursos Inteligentes**
+- **Correção de Digitação**: 'AMONT' automaticamente encontra 'AMOUNT'
+- **Busca Fuzzy de Colunas**: Detecta nomes similares
+- **Ambiente Isolado**: Execução segura com bibliotecas aprovadas
+- **Logs Específicos**: Mostra apenas o código relevante
 
 ## 🏗️ Nova Arquitetura
 
@@ -73,6 +126,59 @@ graph TB
     PC --> SQLITE
 ```
 
+## 🚀 Início Rápido - Passo a Passo
+
+### ⚠️ **IMPORTANTE: Siga a ordem correta!**
+
+```mermaid
+graph TD
+    A[1. Upload de Arquivos] -->|Navegue para| B[2. Preparação de Dados]
+    B -->|Dados salvos| C[3. Banco de Dados]
+    C -->|Executar| D[4. Agentes de IA]
+```
+
+### 📝 **Exemplo Prático Completo**
+
+1. **Página Upload** → Carregue `vendas.csv`
+2. **Página Preparação de Dados** → Clique "Processar"
+3. **Página Banco de Dados** → Veja tabela criada
+4. **Página Agentes de IA** → Configure análise desejada
+5. **Veja resultados** → Estatísticas, outliers, correlações
+
+## ⚠️ Importante: Reinicialização após Mudanças
+
+### 🔄 **Quando Reiniciar o Streamlit**
+
+Sempre que você fizer alterações em:
+- 📝 Arquivos Python (.py)
+- ⚙️ Arquivo de configuração (.env)
+- 📦 Instalação de novas bibliotecas
+- 🔧 Arquivo config.toml
+
+### 🛑 **Como Reiniciar**
+
+```bash
+# 1. Pare o servidor atual (no terminal onde está rodando)
+Ctrl + C
+
+# 2. Inicie novamente
+streamlit run app.py
+```
+
+### 💡 **Dica: Desenvolvimento Rápido**
+
+Para desenvolvimento, use o modo de auto-reload:
+```bash
+# O Streamlit detecta mudanças automaticamente
+streamlit run app.py --server.runOnSave true
+```
+
+### 🚨 **Mudanças que SEMPRE precisam reiniciar**:
+- Alteração no limite de upload (config.toml)
+- Mudança na chave da API (arquivo .env)
+- Instalação de novas dependências (pip install)
+- Alterações em imports ou estrutura de arquivos
+
 ## 🚀 Quick Start
 
 ### ⚡ Instalação Rápida (SQLite)
@@ -114,7 +220,9 @@ echo "DATABASE_URL=sqlite:///./vale_refeicao.db" >> .env
 streamlit run app.py
 ```
 
-## 📁 Estrutura Revolucionária
+> **📌 Lembrete**: Após qualquer mudança no código, reinicie com `Ctrl+C` e `streamlit run app.py`
+
+## 📁 Estrutura 
 
 ```
 vale-refeicao-ia/
@@ -142,15 +250,39 @@ vale-refeicao-ia/
 
 ## 🎯 Como Usar o Novo Sistema
 
-### 1. 📤 **Upload de Dados** (Simplificado)
-```
-📤 Upload de Dados
-├── 📁 Selecione múltiplos arquivos
-├── 🔄 Processamento automático
-└── 📊 Cada arquivo = 1 tabela dinâmica
+### 📋 **Fluxo Completo do Sistema**
+
+```mermaid
+graph LR
+    A[📤 Upload] --> B[🔄 Preparação]
+    B --> C[🗃️ Banco de Dados]
+    C --> D[🤖 Agentes de IA]
+    D --> E[📊 Resultados]
 ```
 
-### 2. 🗃️ **Banco de Dados** (Inteligente)
+### 1. 📤 **Upload de Dados** (Passo 1)
+```
+📤 Upload de Dados
+├── 📁 Selecione múltiplos arquivos (CSV, Excel)
+├── 🔑 Defina coluna de indexação personalizada
+├── ✅ Arquivos são APENAS carregados na memória
+├── 📊 Preview dos dados
+├── ⚡ Suporte a arquivos até 500MB
+└── ➡️ IMPORTANTE: Vá para "Preparação de Dados" após upload
+```
+
+### 2. 🔄 **Preparação de Dados** (Passo 2 - OBRIGATÓRIO)
+```
+🔄 Preparação e Armazenamento
+├── 🤖 Agente de extração limpa e valida dados
+├── 🏗️ Cria tabelas dinâmicas no banco SQLite
+├── 📊 Detecta tipos de dados automaticamente
+├── 🔑 Aplica chaves primárias definidas
+├── 📈 Mostra logs em tempo real
+└── ✅ Salva dados no banco permanentemente
+```
+
+### 3. 🗃️ **Banco de Dados** (Passo 3)
 ```
 🗃️ Visualizador de Banco de Dados
 ├── 📊 Tabelas de Dados (com indicadores de PK)
@@ -162,26 +294,110 @@ vale-refeicao-ia/
     └── 🔍 SQL Avançado
 ```
 
-### 3. 🧮 **Cálculos** (Revolucionário)
+### 4. 🤖 **Agentes de IA** (Passo 4)
 ```
-🧮 Cálculos Inteligentes com IA
-├── ⚙️ Configurar Cálculos
+🤖 Agentes Autônomos Inteligentes
+├── ⚙️ Configurar Agentes
 │   ├── 📝 Prompt em linguagem natural
 │   ├── 🛠️ Seleção de ferramentas
 │   └── 💾 Salvar configuração
-├── 🚀 Executar Cálculos
-│   ├── 🤖 Agente autônomo executa
-│   ├── 🔄 Múltiplas iterações
-│   └── 📊 Resultados detalhados
-└── 📊 Histórico de Cálculos
+├── 🚀 Executar Análises
+│   ├── 📊 Análise Exploratória (EDA)
+│   ├── 🧮 Cálculos Complexos
+│   ├── 💰 Vale Refeição
+│   └── 🔄 Múltiplas iterações
+└── 📊 Histórico de Execuções
 ```
 
-### 4. 🎯 **Prompts** (Configurável)
+### 5. 🎯 **Prompts** (Configuração Avançada)
 ```
 🎯 Gerenciar Prompts
 ├── 📝 Editor de prompts
 ├── 🔧 Configurações de agentes
 └── 📚 Biblioteca de prompts
+```
+
+## 📊 Nova Funcionalidade: Análise Exploratória de Dados (EDA)
+
+### 🎯 **O que é a Análise EDA**
+Ferramenta completa para explorar e entender qualquer dataset, não limitada apenas a vale refeição. Realiza análises estatísticas profundas e identifica padrões automaticamente.
+
+### 📈 **Análises Disponíveis**
+- **📊 Estatísticas Descritivas**: média, mediana, desvio padrão, quartis
+- **🔍 Análise de Tipos**: numéricos, categóricos, temporais
+- **❓ Valores Ausentes**: identificação e padrões de ausência
+- **📉 Distribuições**: normalidade, assimetria, curtose
+- **🔗 Correlações**: matriz completa e pares fortemente correlacionados
+- **🎯 Detecção de Outliers**: método IQR com limites automáticos
+- **📊 Visualizações**: histogramas, boxplots, heatmaps
+- **💡 Insights Automáticos**: recomendações baseadas nos dados
+
+### 🚀 **Como Usar a Análise EDA**
+
+#### 1. **No Upload de Arquivos**
+```python
+1. Faça upload de qualquer CSV/Excel
+2. Marque "Definir coluna de indexação"
+3. Escolha a coluna desejada como chave primária
+4. O sistema se adapta a qualquer estrutura de dados
+```
+
+#### 2. **Via Agente Autônomo**
+```
+Exemplos de perguntas:
+- "Faça uma análise exploratória completa dos dados"
+- "Quais são as estatísticas e distribuições das variáveis?"
+- "Identifique correlações e outliers nas tabelas"
+- "Mostre padrões e tendências nos dados"
+```
+
+#### 3. **Perguntas Específicas Suportadas**
+```
+📊 Descrição dos Dados:
+- "Quais são os tipos de dados (numéricos, categóricos)?"
+- "Qual a distribuição de cada variável?"
+- "Quais as medidas de tendência central?"
+
+🔍 Identificação de Padrões:
+- "Existem padrões temporais?"
+- "Quais valores são mais frequentes?"
+- "Existem agrupamentos nos dados?"
+
+🎯 Detecção de Anomalias:
+- "Existem valores atípicos?"
+- "Como os outliers afetam a análise?"
+
+🔗 Relações entre Variáveis:
+- "Como as variáveis estão relacionadas?"
+- "Existe correlação entre as variáveis?"
+```
+
+### 📊 **Exemplo de Resultado EDA**
+```
+✅ Análise Completa da Tabela 'vendas.csv':
+
+📈 Estatísticas Básicas:
+- 10.000 registros, 15 colunas
+- 3 colunas numéricas, 8 categóricas, 4 temporais
+- 2% valores ausentes em 'desconto'
+
+🔗 Correlações Fortes Encontradas:
+- preço ↔️ quantidade: -0.85 (correlação negativa forte)
+- vendas ↔️ lucro: 0.92 (correlação positiva forte)
+
+🎯 Outliers Detectados:
+- preço: 45 outliers (0.45%)
+- quantidade: 120 outliers (1.2%)
+
+💡 Insights:
+- Distribuição de vendas é assimétrica à direita
+- Sazonalidade detectada em vendas mensais
+- 5 categorias representam 80% das vendas
+
+🎯 Recomendações:
+- Investigar os 45 outliers de preço
+- Considerar transformação log para vendas
+- Remover 200 linhas duplicadas (2%)
 ```
 
 ## 💰 Tool Especializada: Cálculo de Vale Refeição
@@ -577,7 +793,8 @@ DEBUG=false
 Ferramentas Disponíveis:
 ├── 🔍 Análise de Dados
 │   ├── sql_query          # Consultas SQL
-│   ├── data_exploration   # Análise exploratória
+│   ├── eda_analysis       # 📊 Análise Exploratória Completa (NOVO!)
+│   ├── data_exploration   # Exploração básica
 │   ├── data_correlation   # Correlações
 │   └── data_quality       # Qualidade dos dados
 ├── 🧮 Cálculos
@@ -702,4 +919,4 @@ streamlit run app.py
 ```
 
 **Transforme seus dados em insights com o poder dos Agentes de IA Autônomos!** 🤖✨
-# Atualiza��o for�ada 09/18/2025 20:53:34
+# Atualiza��o for�ada 09/18/2025 20:53:34

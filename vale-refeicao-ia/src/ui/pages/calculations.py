@@ -6,15 +6,16 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import json
+from sqlalchemy import text
 
 from ..components import render_alert
 from ...data.database import get_db_manager
 from ...agents.log_utils import log_agent_action
 
 def render():
-    """Renderiza página de cálculos com agentes autônomos"""
-    st.header("🧮 Cálculos Inteligentes com IA")
-    st.caption("Sistema de cálculos baseado em agentes autônomos configuráveis")
+    """Renderiza página de agentes de IA"""
+    st.header("🤖 Agentes de IA")
+    st.caption("Configure e execute agentes autônomos para análises, cálculos e explorações de dados")
     
     # Obter gerenciador de banco
     db = get_db_manager()
@@ -26,7 +27,7 @@ def render():
     
     if not data_tables:
         render_alert(
-            "⚠️ Nenhuma tabela de dados encontrada. Processe arquivos primeiro na seção 'Processamento de Dados'.",
+            "⚠️ Nenhuma tabela de dados encontrada. Processe arquivos primeiro na seção 'Preparação de Dados'.",
             "warning"
         )
         return
@@ -78,14 +79,26 @@ def render_calculation_config_tab(db, data_tables):
     # Formulário de configuração
     st.markdown("### 📝 Nova Configuração de Cálculo")
     
+    # Verificar nomes existentes antes do formulário
+    existing_configs = db.get_calculation_configs()
+    existing_names = [config['name'].lower() for config in existing_configs]
+    
+    # Container para mensagens de validação
+    validation_container = st.empty()
+    
+    # Mostrar aviso se houver muitas configurações com nomes similares
+    if existing_configs:
+        st.caption(f"📋 {len(existing_configs)} configurações já existentes")
+    
     with st.form("calculation_config_form"):
         col1, col2 = st.columns([2, 1])
         
         with col1:
             config_name = st.text_input(
                 "📛 Nome da Configuração",
-                placeholder="Ex: Cálculo Vale Refeição Padrão",
-                help="Nome único para identificar esta configuração"
+                placeholder="Ex: Análise de Vendas Mensais",
+                help="Nome único para identificar esta configuração",
+                key="config_name_input"
             )
             
             config_description = st.text_area(
@@ -106,18 +119,16 @@ def render_calculation_config_tab(db, data_tables):
         st.markdown("### 🎯 Prompt de Cálculo")
         calculation_prompt = st.text_area(
             "Descreva o que o agente deve calcular:",
-            placeholder="""Exemplo (Vale Refeição):
-Atue como um especialista de RH e calculista de vale refeições no Brasil.
+            placeholder="""Exemplo:
+Analise os dados de vendas e identifique os padrões de comportamento do cliente.
 
-A tabela ativos indica a lista geral de colaboradores e se relaciona com as demais pela coluna MATRICULA.
+Considere as seguintes métricas:
+- Volume de vendas por categoria
+- Tendências temporais
+- Produtos mais vendidos
+- Análise de sazonalidade
 
-Gere uma planilha com os colaboradores ativos que tenham direito a vale refeição.
-
-Não se paga vale refeição para colaboradores de férias, que são aprendizes, com afastamentos, que estão no exterior ou desligados.
-
-Considere um mês de 22 dias úteis.
-
-Use a ferramenta 'Cálculo de Vale Refeição' para executar a lógica de negócio e depois exporte para Excel.""",
+Gere um relatório com insights e recomendações estratégicas.""",
             height=200,
             help="Seja específico sobre regras, condições e formato do resultado desejado"
         )
@@ -163,37 +174,168 @@ Use a ferramenta 'Cálculo de Vale Refeição' para executar a lógica de negóc
         submitted = st.form_submit_button("💾 Salvar Configuração", type="primary")
         
         if submitted:
-            if not config_name.strip():
-                st.error("❌ Nome da configuração é obrigatório!")
-            elif not calculation_prompt.strip():
-                st.error("❌ Prompt de cálculo é obrigatório!")
-            elif not selected_tools:
-                st.error("❌ Selecione pelo menos uma ferramenta!")
-            else:
-                config = {
-                    'max_iterations': max_iterations,
-                    'exploration_depth': exploration_depth,
-                    'include_insights': include_insights,
-                    'show_reasoning': show_reasoning
-                }
-                
-                success = db.save_calculation_config(
-                    config_name.strip(),
-                    config_description.strip(),
-                    calculation_prompt.strip(),
-                    selected_tools,
-                    config
-                )
-                
-                if success:
-                    st.success("✅ Configuração salva com sucesso!")
-                    st.rerun()
+            # Usar o container fora do form para mostrar mensagens
+            with validation_container.container():
+                if not config_name.strip():
+                    st.error("❌ Nome da configuração é obrigatório!")
+                    st.stop()
+                elif not calculation_prompt.strip():
+                    st.error("❌ Prompt de cálculo é obrigatório!")
+                    st.stop()
+                elif not selected_tools:
+                    st.error("❌ Selecione pelo menos uma ferramenta!")
+                    st.stop()
+                elif config_name.strip().lower() in existing_names:
+                    st.error(f"❌ Já existe uma configuração com o nome '{config_name}'!")
+                    
+                    # Sugerir nomes alternativos
+                    from datetime import datetime
+                    suggestions = [
+                        f"{config_name} - v2",
+                        f"{config_name} ({datetime.now().strftime('%Y-%m-%d')})",
+                        f"{config_name} - Cópia",
+                        f"{config_name} - {datetime.now().strftime('%H:%M')}"
+                    ]
+                    
+                    st.info("💡 Sugestões de nomes únicos:")
+                    for sugg in suggestions[:3]:
+                        st.caption(f"• {sugg}")
+                    
+                    # Mostrar a configuração existente
+                    for config in existing_configs:
+                        if config['name'].lower() == config_name.strip().lower():
+                            with st.expander("📋 Configuração existente com este nome:", expanded=True):
+                                st.write(f"**Nome:** {config['name']}")
+                                st.write(f"**Descrição:** {config['description']}")
+                                st.write(f"**Criada em:** {config['created_at']}")
+                            break
+                    st.stop()
+                else:
+                    config = {
+                        'max_iterations': max_iterations,
+                        'exploration_depth': exploration_depth,
+                        'include_insights': include_insights,
+                        'show_reasoning': show_reasoning
+                    }
+                    
+                    # Debug - mostrar o que está sendo salvo
+                    st.info(f"💾 Salvando configuração '{config_name}'...")
+                    st.caption(f"Ferramentas selecionadas: {len(selected_tools)}")
+                    st.caption(f"Ferramentas: {', '.join(selected_tools[:3])}{'...' if len(selected_tools) > 3 else ''}")
+                    
+                    try:
+                        success = db.save_calculation_config(
+                            config_name.strip(),
+                            config_description.strip(),
+                            calculation_prompt.strip(),
+                            selected_tools,
+                            config
+                        )
+                        
+                        if success:
+                            st.success("✅ Configuração salva com sucesso!")
+                            # Aguardar um momento antes de recarregar
+                            import time
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            st.error("❌ Erro ao salvar configuração. Verifique os logs.")
+                    except Exception as e:
+                        st.error(f"❌ Erro ao salvar: {str(e)}")
     
     # Lista de configurações existentes
     st.markdown("---")
-    st.markdown("### 📋 Configurações Existentes")
     
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.markdown("### 📋 Configurações Existentes")
+    with col2:
+        if st.button("🔄 Atualizar Lista", use_container_width=True):
+            st.rerun()
+    
+    # Sempre buscar configs do banco
     configs = db.get_calculation_configs()
+    
+    # Debug - mostrar quantas configurações existem
+    st.caption(f"Total de configurações: {len(configs) if configs else 0}")
+    
+    # Debug - listar todas as tabelas
+    with st.expander("🔍 Debug: Tabelas no banco", expanded=False):
+        all_tables = db.list_tables()
+        st.write("Tabelas encontradas:")
+        for table in all_tables:
+            st.write(f"- {table}")
+        
+        # Verificar se calculation_configs está na lista
+        if 'calculation_configs' in all_tables:
+            st.success("✅ Tabela calculation_configs encontrada!")
+            # Fazer query direta
+            try:
+                with db.engine.connect() as conn:
+                    # Contar registros
+                    result = conn.execute(text("SELECT COUNT(*) FROM calculation_configs"))
+                    count = result.scalar()
+                    st.info(f"📊 Total de registros na tabela: {count}")
+                    
+                    # Listar registros
+                    if count > 0:
+                        st.write("**Registros existentes:**")
+                        result = conn.execute(text("SELECT id, name, created_at FROM calculation_configs ORDER BY id"))
+                        for row in result:
+                            st.write(f"- ID: {row[0]}, Nome: {row[1]}, Criado: {row[2]}")
+                    else:
+                        st.warning("⚠️ Nenhum registro encontrado na tabela")
+                        
+                    # Verificar estrutura da tabela
+                    st.write("**📋 Estrutura da tabela:**")
+                    try:
+                        # SQLite pragma para ver estrutura
+                        result = conn.execute(text("PRAGMA table_info(calculation_configs)"))
+                        for col in result:
+                            st.caption(f"- {col[1]} ({col[2]})")
+                    except Exception as e:
+                        st.error(f"Erro ao ver estrutura: {str(e)}")
+                        
+                    # Mostrar botão de ativar apenas se houver registros inativos
+                    inactive_count = count - len(configs)
+                    if inactive_count > 0:
+                        st.warning(f"⚠️ {inactive_count} configurações inativas encontradas")
+                        if st.button("✅ Ativar Todos os Registros", key="activate_all"):
+                            try:
+                                with db.engine.begin() as activate_conn:
+                                    activate_sql = "UPDATE calculation_configs SET is_active = 1 WHERE is_active IS NULL OR is_active = 0"
+                                    activate_conn.execute(text(activate_sql))
+                                st.success("✅ Todos os registros foram ativados!")
+                                st.rerun()
+                            except Exception as act_e:
+                                st.error(f"❌ Erro ao ativar registros: {str(act_e)}")
+                    
+                    # Teste manual de inserção (sempre disponível)
+                    if st.button("🧪 Testar Inserção Manual", key="test_insert"):
+                            import time
+                            unique_name = f"Teste Manual {int(time.time())}"
+                            test_sql = f"""
+                            INSERT INTO calculation_configs 
+                            (name, description, prompt, available_tools, max_iterations,
+                             exploration_depth, include_insights, show_reasoning, is_active)
+                            VALUES ('{unique_name}', 'Teste de inserção manual', 'Prompt teste', 
+                                    '["sql_queries"]', 5, 'Básica', 1, 1, 1)
+                            """
+                            try:
+                                with db.engine.begin() as test_conn:
+                                    test_conn.execute(text(test_sql))
+                                st.success("✅ Inserção manual bem sucedida!")
+                                st.rerun()
+                            except Exception as test_e:
+                                st.error(f"❌ Erro na inserção manual: {str(test_e)}")
+                                
+            except Exception as e:
+                st.error(f"Erro ao consultar tabela: {str(e)}")
+        else:
+            st.error("❌ Tabela calculation_configs NÃO encontrada!")
+            if st.button("🔨 Criar Tabela Manualmente"):
+                db._create_calculation_configs_table()
+                st.rerun()
     
     if configs:
         for config in configs:
@@ -264,7 +406,8 @@ def get_available_tools():
     return {
         'data_analysis': [
             {'id': 'sql_query', 'name': 'Consultas SQL', 'icon': '🔍'},
-            {'id': 'data_exploration', 'name': 'Exploração de Dados', 'icon': '📊'},
+            {'id': 'eda_analysis', 'name': 'Análise Exploratória (EDA)', 'icon': '📊'},
+            {'id': 'data_exploration', 'name': 'Exploração de Dados', 'icon': '🔎'},
             {'id': 'data_correlation', 'name': 'Correlações', 'icon': '🔗'},
             {'id': 'data_quality', 'name': 'Qualidade dos Dados', 'icon': '✅'}
         ],
@@ -313,7 +456,7 @@ def execute_autonomous_calculation(db, data_tables, config, container):
             st.warning("⚠️ Nenhuma ferramenta selecionada!")
         
         calculation_prompt = f"""
-        CONTEXTO: Você é um agente especializado em cálculos de benefícios e análises de RH.
+        CONTEXTO: Você é um agente autônomo inteligente para análise de dados.
         
         OBJETIVO: {config['prompt']}
         
@@ -321,11 +464,11 @@ def execute_autonomous_calculation(db, data_tables, config, container):
         
         INSTRUÇÕES:
         1. Analise os dados disponíveis nas tabelas
-        2. Aplique as regras de cálculo especificadas
+        2. Execute as operações solicitadas
         3. Gere resultados detalhados e organizados
-        4. Forneça relatórios com totais e estatísticas
+        4. Forneça relatórios claros e informativos
         
-        Execute o cálculo de forma autônoma.
+        Execute de forma autônoma.
         """
         
         success = execute_autonomous_agent(db, data_tables, calculation_prompt, config, container)
