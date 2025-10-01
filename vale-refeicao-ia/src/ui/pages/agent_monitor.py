@@ -36,83 +36,21 @@ def render_monitor_content():
     """Renderiza conteúdo do monitor"""
     
     # Tabs para diferentes visualizações
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "📊 Status Geral", 
+    tab1, tab2, tab3 = st.tabs([
         "📜 Logs em Tempo Real", 
         "🔍 Ações dos Agentes",
         "📈 Métricas"
     ])
     
     with tab1:
-        render_status_overview()
-    
-    with tab2:
         render_realtime_logs()
     
-    with tab3:
+    with tab2:
         render_agent_actions()
     
-    with tab4:
+    with tab3:
         render_metrics()
 
-def render_status_overview():
-    """Renderiza visão geral do status dos agentes"""
-    st.subheader("Status dos Agentes")
-    
-    # Status de cada agente
-    agents = [
-        {
-            'nome': '🔍 Agente de Extração',
-            'status': st.session_state.get('extraction_status', 'idle'),
-            'última_ação': get_last_agent_action('extraction_agent')
-        },
-        {
-            'nome': '🧮 Agente de Cálculo',
-            'status': st.session_state.get('calculation_status', 'idle'),
-            'última_ação': get_last_agent_action('calculation_agent')
-        },
-        {
-            'nome': '📊 Agente de Relatórios',
-            'status': st.session_state.get('report_status', 'idle'),
-            'última_ação': get_last_agent_action('report_agent')
-        }
-    ]
-    
-    # Criar colunas para cada agente
-    cols = st.columns(3)
-    
-    for idx, agent in enumerate(agents):
-        with cols[idx]:
-            # Card do agente
-            with st.container():
-                st.markdown(f"### {agent['nome']}")
-                
-                # Indicador de status
-                status_color = {
-                    'idle': '⚪',
-                    'running': '🟡',
-                    'success': '🟢',
-                    'error': '🔴'
-                }
-                
-                status_text = {
-                    'idle': 'Inativo',
-                    'running': 'Processando',
-                    'success': 'Concluído',
-                    'error': 'Erro'
-                }
-                
-                st.markdown(f"{status_color.get(agent['status'], '⚪')} **{status_text.get(agent['status'], 'Desconhecido')}**")
-                
-                if agent['última_ação']:
-                    st.caption(f"Última ação: {agent['última_ação']['action']}")
-                    st.caption(f"Há {get_time_ago(agent['última_ação']['timestamp'])}")
-                else:
-                    st.caption("Nenhuma ação registrada")
-                
-                # Progress bar simulado se estiver rodando
-                if agent['status'] == 'running':
-                    st.progress(0.5)
 
 def render_realtime_logs():
     """Renderiza logs em tempo real"""
@@ -248,12 +186,23 @@ def render_metrics():
         # Timeline de atividade
         st.subheader("Timeline de Atividade")
         
-        # Preparar dados para timeline
-        df_logs['timestamp'] = pd.to_datetime(df_logs['timestamp'])
-        df_logs['hour'] = df_logs['timestamp'].dt.hour
-        
-        activity_by_hour = df_logs.groupby(['hour', 'agent']).size().unstack(fill_value=0)
-        st.line_chart(activity_by_hour)
+        # Preparar dados para timeline - com tratamento de erro
+        try:
+            # Tentar converter timestamps com diferentes formatos
+            df_logs['timestamp'] = pd.to_datetime(df_logs['timestamp'], errors='coerce', format='mixed')
+            
+            # Remover timestamps inválidos
+            df_logs = df_logs.dropna(subset=['timestamp'])
+            
+            if not df_logs.empty:
+                df_logs['hour'] = df_logs['timestamp'].dt.hour
+                activity_by_hour = df_logs.groupby(['hour', 'agent']).size().unstack(fill_value=0)
+                st.line_chart(activity_by_hour)
+            else:
+                st.info("Não foi possível processar os timestamps para o gráfico de timeline.")
+        except Exception as e:
+            st.warning(f"Erro ao processar timeline: {str(e)}")
+            st.info("Alguns timestamps podem estar em formato incompatível.")
 
 def get_last_agent_action(agent_name: str):
     """Obtém a última ação de um agente"""
@@ -267,7 +216,17 @@ def get_last_agent_action(agent_name: str):
 def get_time_ago(timestamp_str: str):
     """Calcula quanto tempo passou desde o timestamp"""
     try:
-        timestamp = datetime.fromisoformat(timestamp_str)
+        # Tentar diferentes formatos de timestamp
+        if 'T' in timestamp_str:
+            # Formato ISO8601
+            timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+        else:
+            # Formato apenas hora (HH:MM:SS) - assumir hoje
+            from datetime import date
+            today = date.today()
+            time_part = datetime.strptime(timestamp_str, '%H:%M:%S').time()
+            timestamp = datetime.combine(today, time_part)
+        
         now = datetime.now()
         delta = now - timestamp
         
@@ -277,7 +236,7 @@ def get_time_ago(timestamp_str: str):
             return f"{int(delta.total_seconds() / 60)}m"
         else:
             return f"{int(delta.total_seconds() / 3600)}h"
-    except:
+    except Exception:
         return "?"
 
 def simulate_agent_actions():

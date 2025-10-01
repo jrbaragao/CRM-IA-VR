@@ -20,12 +20,9 @@ COPY . .
 # Criar diretórios necessários
 RUN mkdir -p uploads exports chroma_db
 
-# Expor porta do Streamlit
+# Expor porta do Streamlit (dinâmica para cloud)
+EXPOSE $PORT
 EXPOSE 8501
 
 # Comando para executar a aplicação
-CMD ["streamlit", "run", "app.py", \
-     "--server.port=8501", \
-     "--server.address=0.0.0.0", \
-     "--server.headless=true", \
-     "--server.fileWatcherType=none"]
+CMD ["sh", "-c", "streamlit run app.py --server.port=${PORT:-8501} --server.address=0.0.0.0 --server.headless=true --server.fileWatcherType=none --server.enableCORS=false"]

@@ -32,21 +32,26 @@ def render():
         )
         return
     
+    # Inicializar estado da tab se não existir
+    if 'calculation_active_tab' not in st.session_state:
+        st.session_state.calculation_active_tab = 1  # Default para "Executar Cálculos"
+    
     # Tabs principais
-    tab1, tab2, tab3 = st.tabs([
+    tabs = st.tabs([
         "⚙️ Configurar Cálculos",
         "🚀 Executar Cálculos", 
         "📊 Histórico de Cálculos"
     ])
     
-    with tab1:
-        render_calculation_config_tab(db, data_tables)
-    
-    with tab2:
-        render_calculation_execution_tab(db, data_tables)
-    
-    with tab3:
-        render_calculation_history_tab(db)
+    # Renderizar conteúdo baseado na tab ativa
+    for idx, tab in enumerate(tabs):
+        with tab:
+            if idx == 0:
+                render_calculation_config_tab(db, data_tables)
+            elif idx == 1:
+                render_calculation_execution_tab(db, data_tables)
+            elif idx == 2:
+                render_calculation_history_tab(db)
 
 def render_calculation_config_tab(db, data_tables):
     """Renderiza aba de configuração de cálculos"""
@@ -382,9 +387,14 @@ def render_calculation_execution_tab(db, data_tables):
             st.markdown(f"**🛠️ Ferramentas:** {len(selected_config['available_tools'])}")
             st.code(selected_config['prompt'], language='text')
         
-        if st.button("🚀 Iniciar Cálculo Autônomo", type="primary"):
-            execution_container = st.empty()
-            execute_autonomous_calculation(db, data_tables, selected_config, execution_container)
+        # Container para o resultado do cálculo
+        result_container = st.container()
+        
+        if st.button("🚀 Iniciar Cálculo Autônomo", type="primary", key="exec_calc_btn"):
+            # Executar no container dedicado para evitar mudança de tab
+            with result_container:
+                st.markdown("---")
+                execute_autonomous_calculation(db, data_tables, selected_config, result_container)
 
 def render_calculation_history_tab(db):
     """Renderiza aba de histórico"""
@@ -402,26 +412,17 @@ def render_calculation_history_tab(db):
         st.info("📝 Nenhum cálculo executado ainda.")
 
 def get_available_tools():
-    """Retorna ferramentas disponíveis"""
+    """Retorna ferramentas disponíveis (apenas as implementadas)"""
     return {
         'data_analysis': [
             {'id': 'sql_query', 'name': 'Consultas SQL', 'icon': '🔍'},
-            {'id': 'eda_analysis', 'name': 'Análise Exploratória (EDA)', 'icon': '📊'},
-            {'id': 'data_exploration', 'name': 'Exploração de Dados', 'icon': '🔎'},
-            {'id': 'data_correlation', 'name': 'Correlações', 'icon': '🔗'},
-            {'id': 'data_quality', 'name': 'Qualidade dos Dados', 'icon': '✅'}
+            {'id': 'eda_analysis', 'name': 'Análise Exploratória (EDA)', 'icon': '📊'}
         ],
         'calculations': [
-            {'id': 'calculo_vale_refeicao', 'name': '🍽️ Cálculo de Vale Refeição', 'icon': '💰'},
-            {'id': 'mathematical_operations', 'name': 'Operações Matemáticas', 'icon': '🧮'},
-            {'id': 'conditional_logic', 'name': 'Lógica Condicional', 'icon': '🔀'},
-            {'id': 'aggregations', 'name': 'Agregações', 'icon': '📈'},
-            {'id': 'report_generation', 'name': 'Relatórios', 'icon': '📄'}
+            {'id': 'calculo_vale_refeicao', 'name': '🍽️ Cálculo de Vale Refeição', 'icon': '💰'}
         ],
         'export_tools': [
-            {'id': 'excel_export', 'name': 'Exportar para Excel', 'icon': '📊'},
-            {'id': 'csv_export', 'name': 'Exportar para CSV', 'icon': '📄'},
-            {'id': 'json_export', 'name': 'Exportar para JSON', 'icon': '🔗'}
+            {'id': 'excel_export', 'name': 'Exportar para Excel', 'icon': '📊'}
         ]
     }
 

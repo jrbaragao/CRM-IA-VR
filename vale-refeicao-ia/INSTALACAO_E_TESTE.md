@@ -38,7 +38,7 @@ source venv/bin/activate
 
 ```bash
 # Instale todas as dependências incluindo bibliotecas de visualização
-pip install -r requirements-working.txt
+pip install -r requirements.txt
 
 # Ou se preferir instalar individualmente:
 pip install streamlit pandas numpy sqlalchemy

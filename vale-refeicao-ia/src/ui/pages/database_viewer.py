@@ -1848,12 +1848,25 @@ Crie um plano estruturado em JSON com as chaves:
             st.error("❌ LlamaIndex não está instalado corretamente")
             return False
         except Exception as e:
+            import traceback
+            error_traceback = traceback.format_exc()
             st.error(f"❌ Erro durante análise autônoma: {str(e)}")
+            
+            # Log detalhado do erro
+            if 'agent_logs' in st.session_state:
+                st.session_state['agent_logs'].append({
+                    'timestamp': datetime.now().strftime('%H:%M:%S'),
+                    'agent': 'error_debug',
+                    'action': '❌ Traceback do erro',
+                    'details': error_traceback
+                })
+            
             log_agent_action(
                 "autonomous_agent",
                 "❌ Erro na análise autônoma",
                 {
                     "erro": str(e),
+                    "traceback": error_traceback[:500],
                     "pergunta": question[:100],
                     "iteracao_atual": iteration
                 }
@@ -2126,111 +2139,13 @@ def execute_analysis_iteration(llm, db, data_tables: list, context: dict, config
         'soma', 'máximo', 'mínimo', 'maior valor', 'menor valor'
     ])
     
-    # Verificar se precisa de análise estatística complexa ou visualização
-    needs_statistical_analysis = any(keyword in user_question.lower() for keyword in [
-        'mediana', 'desvio padrão', 'quartil', 'percentil', 'distribuição',
-        'tendência central', 'variância', 'moda', 'assimetria', 'curtose',
-        'correlação', 'outlier', 'boxplot', 'histograma',
-        # Palavras-chave para gráficos e visualizações
-        'gráfico', 'grafico', 'plot', 'scatter', 'dispersão', 'dispersao',
-        'visualize', 'visualização', 'visualizacao', 'mostre graficamente',
-        'faça um gráfico', 'crie um gráfico', 'gere um gráfico',
-        'linha', 'barra', 'pizza', 'heatmap', 'mapa de calor'
-    ])
-    
-    # Log para debug
-    if needs_statistical_analysis:
-        st.session_state['agent_logs'].append({
-            'timestamp': datetime.now().strftime('%H:%M:%S'),
-            'agent': 'decision_engine',
-            'action': '🎯 Detectada necessidade de análise estatística/visualização',
-            'details': {
-                'pergunta_extraida': user_question,
-                'needs_stats': needs_statistical_analysis,
-                'is_simple': is_simple_question
-            }
-        })
-    
-    # Verificação DIRETA para gráficos - PRIMEIRA COISA A VERIFICAR
-    graph_keywords = ['gráfico', 'grafico', 'plot', 'scatter', 'dispersão', 'dispersao',
-                      'visualiz', 'graph', 'chart', 'eixo x', 'eixo y', 'axis',
-                      'faça um gráfico', 'fazer um gráfico', 'crie um gráfico', 'criar um gráfico',
-                      'gere um gráfico', 'gerar um gráfico', 'mostre graficamente',
-                      'time no eixo', 'amount no eixo']
-    
-    if any(keyword in user_question.lower() for keyword in graph_keywords):
-        # Forçar diretamente para gráficos
-        st.session_state['agent_logs'].append({
-            'timestamp': datetime.now().strftime('%H:%M:%S'),
-            'agent': 'decision_engine',
-            'action': '🎯 GRÁFICO DETECTADO - Forçando análise Python',
-            'details': {'pergunta': user_question}
-        })
-        
-        return {
-            "action_type": "eda_analysis",
-            "target_table": data_tables[0] if data_tables else 'tabela',
-            "query": user_question,
-            "description": "Gerando visualização gráfica solicitada",
-            "analysis_complete": True,
-            "reasoning": "Detecção direta de solicitação de gráfico"
-        }
     
     # Se menciona média E mediana, precisa de análise complexa
     if 'média' in user_question.lower() and 'mediana' in user_question.lower():
         is_simple_question = False
-        needs_statistical_analysis = True
     
-    # Para perguntas simples de média e mediana, executar e marcar como completo
-    if is_simple_stats_question and iteration == 1:
-        action_prompt = f"""
-A pergunta "{user_question}" é sobre medidas de tendência central básicas (média e mediana).
-
-Execute APENAS o cálculo necessário e marque como completo.
-
-Responda EXATAMENTE este JSON:
-{{
-"action_type": "eda_analysis",
-"target_table": "{data_tables[0] if data_tables else 'tabela'}",
-"query": "{user_question}",
-"description": "Calculando média e mediana",
-"analysis_complete": true,
-"reasoning": "Pergunta simples de estatística - apenas um cálculo necessário"
-}}
-"""
-    
-    # Para perguntas que precisam de análise estatística complexa ou gráficos
-    elif needs_statistical_analysis:
-        # Detectar se é especificamente sobre gráficos
-        is_graph_request = any(keyword in user_question.lower() for keyword in [
-            'gráfico', 'grafico', 'plot', 'scatter', 'dispersão', 'dispersao',
-            'visualize', 'visualização', 'visualizacao', 'mostre graficamente',
-            'faça um gráfico', 'crie um gráfico', 'gere um gráfico',
-            'generate a scatter', 'create a scatter', 'make a scatter',
-            'time no eixo x', 'amount no eixo y', 'eixo x', 'eixo y'
-        ])
-        
-        if is_graph_request:
-            description = "Gerando visualização gráfica"
-        else:
-            description = "Executando análise estatística com Python"
-        
-        action_prompt = f"""
-A pergunta "{user_question}" requer {"VISUALIZAÇÃO GRÁFICA" if is_graph_request else "ANÁLISE ESTATÍSTICA"} que deve ser feita com Python.
-
-{"Use Python para criar o gráfico solicitado." if is_graph_request else "Use Python para calcular estatísticas como mediana, desvio padrão, etc."}
-
-Responda EXATAMENTE este JSON:
-{{
-"action_type": "eda_analysis",
-"target_table": "{data_tables[0] if data_tables else 'tabela'}",
-"query": "{user_question}",
-"description": "{description}",
-"analysis_complete": true
-}}
-"""
     # Para perguntas simples, forçar resposta direta SQL
-    elif is_simple_question and iteration == 1:
+    if is_simple_question and iteration == 1:
         action_prompt = f"""
 A pergunta "{user_question}" é SIMPLES e requer apenas uma consulta SQL.
 
@@ -2251,14 +2166,26 @@ PERGUNTA: {user_question}
 
 TABELAS: {tables_short}
 
-FERRAMENTAS:
-- "sql_query": Para consultas diretas (COUNT, SUM, AVG, MAX, MIN, SELECT)
-- "eda_analysis": Para análises complexas (distribuições, correlações, outliers) e QUALQUER GRÁFICO/VISUALIZAÇÃO
+FERRAMENTAS DISPONÍVEIS:
+- "sql_query": APENAS para consultas SQL diretas (COUNT, SUM, AVG, MAX, MIN, SELECT) que retornam números ou tabelas
+- "eda_analysis": Para QUALQUER análise que precise de Python, incluindo:
+  * Gráficos (scatter, plot, dispersão, visualização, chart, graph)
+  * Estatísticas complexas (mediana, desvio padrão, distribuições)
+  * Análises exploratórias (correlações, outliers, padrões)
 
-REGRAS:
-1. Se pede GRÁFICO ou VISUALIZAÇÃO → SEMPRE use "eda_analysis"
-2. Se pode ser respondida com SQL simples → use "sql_query"
-3. Se precisa cálculos estatísticos complexos → use "eda_analysis"
+DECISÃO CRÍTICA:
+- Menciona GRÁFICO, PLOT, VISUALIZAÇÃO, SCATTER, DISPERSÃO? → USE "eda_analysis"
+- Menciona EIXO X/Y, MOSTRAR GRAFICAMENTE? → USE "eda_analysis"
+- Precisa de PYTHON para responder? → USE "eda_analysis"
+- Pode ser resolvido com SQL puro? → USE "sql_query"
+
+EXEMPLOS:
+- "Quantos registros?" → sql_query
+- "Média de valores" → sql_query (se SQL tem AVG)
+- "Mediana de valores" → eda_analysis (SQL não tem MEDIAN)
+- "Faça um gráfico" → eda_analysis (sempre!)
+- "Plot scatter de X vs Y" → eda_analysis (sempre!)
+- "Mostre distribuição" → eda_analysis (visualização!)
 
 Responda APENAS JSON:
 {{
@@ -2284,7 +2211,11 @@ Responda APENAS JSON:
             'timestamp': datetime.now().strftime('%H:%M:%S'),
             'agent': 'json_parser',
             'action': f'📝 Resposta LLM Iteração {iteration}',
-            'details': {'raw_response': response.text[:200]}
+            'details': {
+                'raw_response': response.text[:300],
+                'question_sent': user_question[:100],
+                'model_used': config.get('llm_model', 'default')
+            }
         })
         
         try:
@@ -3527,6 +3458,14 @@ def synthesize_final_results(llm, context: dict, config: dict) -> dict:
                             findings_summary.append(f"- {insight}")
                         elif isinstance(insight, dict) and 'text' in insight:
                             findings_summary.append(f"- {insight['text']}")
+                
+                # Adicionar informação sobre plots gerados
+                if finding.get('plots'):
+                    num_plots = len(finding['plots'])
+                    findings_summary.append(f"- ✅ {num_plots} gráfico(s) gerado(s) com sucesso")
+                    for plot in finding['plots']:
+                        plot_title = plot.get('title', 'Gráfico') if isinstance(plot, dict) else 'Gráfico'
+                        findings_summary.append(f"  - {plot_title}")
                             
                 if finding.get('execution_results'):
                     # Adicionar resultados específicos da execução
@@ -3577,8 +3516,12 @@ def synthesize_final_results(llm, context: dict, config: dict) -> dict:
     RESULTADOS ENCONTRADOS:
     {findings_text}
 
-    Forneça resposta direta e objetiva.
-    {"Mencione que foi gerada planilha Excel." if should_generate_excel else ""}
+    IMPORTANTE: 
+    - Se gráficos foram gerados com sucesso, mencione isso claramente.
+    - Se correlações ou análises estatísticas foram calculadas, inclua os valores.
+    - Forneça resposta direta e objetiva baseada nos resultados REAIS obtidos.
+    - NÃO sugira passos para criar gráficos se eles já foram criados.
+    {"- Mencione que foi gerada planilha Excel." if should_generate_excel else ""}
     """
     
     try:
@@ -3662,10 +3605,20 @@ def render_python_eda_results(eda_results: dict):
             # Agrupar por categoria
             insights_by_category = {}
             for insight in eda_results['insights']:
-                category = insight.get('category', 'geral')
+                # Insight pode ser string ou dicionário
+                if isinstance(insight, str):
+                    category = 'geral'
+                    text = insight
+                elif isinstance(insight, dict):
+                    category = insight.get('category', 'geral')
+                    text = insight.get('text', str(insight))
+                else:
+                    category = 'geral'
+                    text = str(insight)
+                    
                 if category not in insights_by_category:
                     insights_by_category[category] = []
-                insights_by_category[category].append(insight['text'])
+                insights_by_category[category].append(text)
             
             # Mostrar por categoria
             for category, insights in insights_by_category.items():
@@ -3794,9 +3747,18 @@ def render_eda_results(eda_results: dict):
 def render_analysis_step(step: dict, show_reasoning: bool):
     """Renderiza uma etapa da análise"""
     
+    # Debug log
+    if 'agent_logs' in st.session_state:
+        st.session_state['agent_logs'].append({
+            'timestamp': datetime.now().strftime('%H:%M:%S'),
+            'agent': 'render_debug',
+            'action': '🔍 Debug render_analysis_step',
+            'details': f"Step: {step['step']}, Action: {step['action']}, Result type: {type(step.get('result'))}, Action type: {step.get('result', {}).get('action_type') if isinstance(step.get('result'), dict) else 'N/A'}"
+        })
+    
     # Renderizar resultados EDA se existirem
     result = step.get('result', {})
-    if isinstance(result, dict) and result.get('action_type') == 'eda_analysis':
+    if isinstance(result, dict) and result.get('action_type') in ['eda_analysis', 'python_eda']:
         # Se foi sucesso, renderizar resultados EDA especiais
         if result.get('success', False):
             render_eda_results(result)

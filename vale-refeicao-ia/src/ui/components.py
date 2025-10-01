@@ -192,59 +192,8 @@ def _render_navigation_content() -> str:
     
     st.divider()
     
-    # Status dos agentes
-    st.header("🤖 Status dos Agentes")
-    
-    # Extraction Agent
-    extraction_status = st.session_state.get('extraction_status', 'idle')
-    render_agent_status("Agente de Extração", extraction_status)
-    
-    # Calculation Agent
-    calculation_status = st.session_state.get('calculation_status', 'idle')
-    render_agent_status("Agente de Cálculo", calculation_status)
-    
-    # Report Agent
-    report_status = st.session_state.get('report_status', 'idle')
-    render_agent_status("Agente de Relatórios", report_status)
-    
-    st.divider()
-    
-    # Configurações
-    st.header("⚙️ Configurações")
-    
-    # API Key
-    api_key = st.text_input(
-        "OpenAI API Key:",
-        type="password",
-        help="Necessária para funcionamento dos agentes IA"
-    )
-    
-    if api_key:
-        st.session_state['openai_api_key'] = api_key
-        st.success("✅ API Key configurada!")
-    
     return selected_page
 
-def render_agent_status(agent_name: str, status: str):
-    """Renderiza status de um agente"""
-    status_colors = {
-        'idle': '⚪',
-        'running': '🟡',
-        'completed': '🟢',
-        'error': '🔴'
-    }
-    
-    status_texts = {
-        'idle': 'Inativo',
-        'running': 'Executando',
-        'completed': 'Concluído',
-        'error': 'Erro'
-    }
-    
-    icon = status_colors.get(status, '⚪')
-    text = status_texts.get(status, 'Desconhecido')
-    
-    st.markdown(f"{icon} **{agent_name}**: {text}")
 
 def render_metrics_row(metrics: List[Dict[str, Any]]):
     """Renderiza uma linha de métricas"""

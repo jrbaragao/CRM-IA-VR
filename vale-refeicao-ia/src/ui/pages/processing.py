@@ -49,7 +49,6 @@ def render():
     """)
     
     # Status dos agentes
-    st.session_state['extraction_status'] = 'idle'
     
     # Container para processamento
     with st.container():
@@ -76,7 +75,6 @@ def render():
 
 def process_files():
     """Processa os arquivos carregados"""
-    st.session_state['extraction_status'] = 'running'
     
     # Criar área de status no topo
     status_area = st.container()
@@ -301,7 +299,6 @@ def process_files():
                 
             except Exception as e:
                 st.error(f"❌ Erro no processamento: {str(e)}")
-                st.session_state['extraction_status'] = 'error'
             
             # Adicionar divisória entre arquivos
             if idx < len(st.session_state['uploaded_files']) - 1:
@@ -309,7 +306,6 @@ def process_files():
     
     # Salvar dados processados
     st.session_state['processed_data'] = processed_data
-    st.session_state['extraction_status'] = 'success'
     
     # Atualizar status final
     overall_progress.progress(1.0)

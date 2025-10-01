@@ -84,13 +84,92 @@ class SafePythonExecutor:
             'save_plot': self._save_plot,
             'add_insight': self._add_insight,
             'show_results': self._show_results,
+            # Criar uma classe wrapper para a lista de plots
+            'PlotsList': self._create_plots_list_class(),
             # Listas para resultados - importante para acesso no código executado
             'execution_results': self.execution_results,
-            'plots': self.plots,
+            'plots': self._create_plots_wrapper(),
             'insights': self.insights,
         }
         
         return safe_globals
+    
+    def _create_plots_list_class(self):
+        """Cria uma classe que herda de list mas intercepta append"""
+        parent = self
+        
+        class PlotsList(list):
+            def append(self, item):
+                # Log de tentativa de adicionar plot
+                if 'st' in globals() and hasattr(globals()['st'], 'session_state'):
+                    if 'agent_logs' in globals()['st'].session_state:
+                        globals()['st'].session_state['agent_logs'].append({
+                            'timestamp': datetime.now().strftime('%H:%M:%S'),
+                            'agent': 'plots_list',
+                            'action': '🎨 Tentando adicionar item à lista de plots',
+                            'details': f'Tipo do item: {type(item)}, hasattr savefig: {hasattr(item, "savefig")}'
+                        })
+                
+                # Se for uma figura matplotlib
+                if hasattr(item, 'savefig'):
+                    try:
+                        buffer = io.BytesIO()
+                        item.savefig(buffer, format='png', dpi=100, bbox_inches='tight')
+                        buffer.seek(0)
+                        plot_base64 = base64.b64encode(buffer.read()).decode()
+                        plt.close(item)
+                        
+                        super().append({
+                            'title': 'Plot',
+                            'image': plot_base64,
+                            'timestamp': datetime.now()
+                        })
+                        
+                        # Log
+                        if 'st' in globals() and hasattr(globals()['st'], 'session_state'):
+                            if 'agent_logs' in globals()['st'].session_state:
+                                globals()['st'].session_state['agent_logs'].append({
+                                    'timestamp': datetime.now().strftime('%H:%M:%S'),
+                                    'agent': 'plot_converter',
+                                    'action': '✅ PLOT SALVO COM SUCESSO!',
+                                    'details': f'Figura matplotlib convertida para base64. Tamanho: {len(plot_base64)} bytes'
+                                })
+                    except Exception as e:
+                        parent.execution_results.append(f"Erro ao converter figura: {str(e)}")
+                # Se já for um dicionário válido
+                elif isinstance(item, dict) and 'image' in item:
+                    super().append(item)
+                else:
+                    # Tentar tratar como figura
+                    try:
+                        if hasattr(plt, 'figure') and isinstance(item, plt.Figure):
+                            # É uma figura matplotlib
+                            buffer = io.BytesIO()
+                            item.savefig(buffer, format='png', dpi=100, bbox_inches='tight')
+                            buffer.seek(0)
+                            plot_base64 = base64.b64encode(buffer.read()).decode()
+                            plt.close(item)
+                            
+                            super().append({
+                                'title': 'Plot',
+                                'image': plot_base64,
+                                'timestamp': datetime.now()
+                            })
+                    except:
+                        parent.execution_results.append(f"Aviso: não foi possível adicionar item do tipo {type(item)} aos plots")
+        
+        return PlotsList
+    
+    def _create_plots_wrapper(self):
+        """Cria um wrapper para a lista de plots que intercepta append"""
+        PlotsList = self._create_plots_list_class()
+        wrapped_plots = PlotsList()
+        # Copiar referência para a lista original
+        for item in self.plots:
+            wrapped_plots.append(item)
+        # Substituir a lista original
+        self.plots = wrapped_plots
+        return self.plots
     
     def _save_plot(self, title: str = "Plot"):
         """Salva o plot atual"""
@@ -106,6 +185,16 @@ class SafePythonExecutor:
                 'image': plot_base64,
                 'timestamp': datetime.now()
             })
+            
+            # Log para debug
+            if 'st' in globals() and hasattr(globals()['st'], 'session_state'):
+                if 'agent_logs' in globals()['st'].session_state:
+                    globals()['st'].session_state['agent_logs'].append({
+                        'timestamp': datetime.now().strftime('%H:%M:%S'),
+                        'agent': 'plot_saver',
+                        'action': f'📊 Plot salvo: {title}',
+                        'details': f'Tamanho da imagem: {len(plot_base64)} bytes'
+                    })
         except Exception as e:
             self.execution_results.append(f"Erro ao salvar plot: {str(e)}")
     
@@ -184,6 +273,15 @@ class SafePythonExecutor:
                     self.execution_results.append(exec_results)
                 elif isinstance(exec_results, list):
                     self.execution_results = exec_results
+            
+            # Log após execução bem-sucedida
+            if 'agent_logs' in st.session_state:
+                st.session_state['agent_logs'].append({
+                    'timestamp': datetime.now().strftime('%H:%M:%S'),
+                    'agent': 'python_executor',
+                    'action': '✅ Execução concluída',
+                    'details': f'Plots salvos: {len(self.plots)}, Insights: {len(self.insights)}, Results: {len(self.execution_results)}'
+                })
             
             return {
                 'success': True,
@@ -341,7 +439,10 @@ REQUISITOS DO CÓDIGO:
 2. O DataFrame já está disponível como '{table_name}'
 3. Adicione resultados à lista 'execution_results' como dicionários com 'title' e 'data'
 4. Adicione insights textuais à lista 'insights' 
-5. Adicione gráficos à lista 'plots' usando plt.gcf()
+5. IMPORTANTE PARA GRÁFICOS: Após criar um plot com plt, SEMPRE chame:
+   plots.append(plt.gcf())  # Adiciona o gráfico atual à lista
+   OU
+   save_plot("Título do Gráfico")  # Função auxiliar que salva o plot
 6. Use print() para debug
 7. Trate erros com try/except
 8. Para estatísticas, calcule média, mediana, desvio padrão quando relevante
@@ -379,11 +480,23 @@ print("Tipos de dados:", {table_name}.dtypes.to_dict())
 #             return col
 #     return None
 # 
-# # Exemplo de uso:
-# col_amount = find_column(df, 'AMONT')  # Encontrará 'AMOUNT'
-# col_time = find_column(df, 'TIME')     # Encontrará 'Time' ou 'TIME'
+# # Exemplo de uso para scatter plot:
+# col_amount = find_column(df, 'AMOUNT')
+# col_time = find_column(df, 'TIME')
 # 
 # if col_amount and col_time:
+#     # Criar scatter plot
+#     plt.figure(figsize=(10, 6))
+#     plt.scatter(df[col_time], df[col_amount], alpha=0.5)
+#     plt.xlabel(col_time)
+#     plt.ylabel(col_amount)
+#     plt.title(f'Scatter Plot: {{col_time}} vs {{col_amount}}')
+#     plt.grid(True, alpha=0.3)
+#     
+#     # IMPORTANTE: Salvar o plot
+#     plots.append(plt.gcf())  # ou save_plot("Scatter TIME vs AMOUNT")
+#     
+#     # Calcular correlação
 #     correlacao = df[col_amount].corr(df[col_time])
 #     execution_results.append({{'title': 'Correlação', 'data': correlacao}})
 #     insights.append(f"Correlação entre {{col_amount}} e {{col_time}}: {{correlacao:.4f}}")
@@ -444,9 +557,19 @@ if not execution_results and not insights:
             st.session_state['agent_logs'].append({
                 'timestamp': datetime.now().strftime('%H:%M:%S'),
                 'agent': 'code_generator',
-                'action': '🎯 Código LLM Gerado (Real)',
-                'details': f"Código específico para: {question[:50]}...\n\n{code[:500]}..." if len(code) > 500 else code
+                'action': '🎯 Código LLM Gerado (Real) - COMPLETO',
+                'details': f"Pergunta: {question}\n\n{code}"  # Mostrar código completo
             })
+            
+            # Verificar se o código contém comandos de plot
+            has_plot_save = ('plots.append' in final_code or 'save_plot' in final_code)
+            if 'scatter' in question.lower() or 'plot' in question.lower() or 'gráfico' in question.lower():
+                st.session_state['agent_logs'].append({
+                    'timestamp': datetime.now().strftime('%H:%M:%S'),
+                    'agent': 'code_validator',
+                    'action': '🔍 Verificação de salvamento de plot',
+                    'details': f"Código {'✅ CONTÉM' if has_plot_save else '❌ NÃO CONTÉM'} comando para salvar plot (plots.append ou save_plot)"
+                })
         
         return final_code
         
@@ -1099,8 +1222,8 @@ def execute_python_eda(db, data_tables: list, query: str) -> Dict[str, Any]:
             st.session_state['agent_logs'].append({
                 'timestamp': datetime.now().strftime('%H:%M:%S'),
                 'agent': 'python_eda',
-                'action': '💻 Código Final Executado',
-                'details': f"Total: {len(code_lines)} linhas\nPergunta: {query[:50]}...\n\n{code_preview}"
+                'action': '💻 Código Final Executado - COMPLETO',
+                'details': f"Total: {len(code_lines)} linhas\nPergunta: {query}\n\n{code}"  # Mostrar código completo
             })
             
             # Separar e mostrar a parte específica do código (sem o template)
@@ -1275,6 +1398,22 @@ def execute_python_eda(db, data_tables: list, query: str) -> Dict[str, Any]:
                             'action': '📋 Saída Completa do Python',
                             'details': results['stdout'][:500]  # Primeiros 500 caracteres
                         })
+                
+                # Log específico para plots
+                if results.get('plots'):
+                    st.session_state['agent_logs'].append({
+                        'timestamp': datetime.now().strftime('%H:%M:%S'),
+                        'agent': 'python_eda',
+                        'action': f'📊 {len(results["plots"])} gráfico(s) gerado(s)',
+                        'details': f"Plots: {[p.get('title', 'Sem título') for p in results['plots']]}"
+                    })
+                else:
+                    st.session_state['agent_logs'].append({
+                        'timestamp': datetime.now().strftime('%H:%M:%S'),
+                        'agent': 'python_eda',
+                        'action': '⚠️ Nenhum gráfico foi gerado',
+                        'details': 'Lista de plots está vazia ou código não salvou o gráfico'
+                    })
             else:
                 st.session_state['agent_logs'].append({
                     'timestamp': datetime.now().strftime('%H:%M:%S'),

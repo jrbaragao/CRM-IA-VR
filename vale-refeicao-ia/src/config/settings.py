@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     app_version: str = "1.0.0"
     debug: bool = Field(default=False, env="DEBUG")
     
+    # Configurações de servidor (cloud-friendly)
+    port: int = Field(default=8501, env="PORT")  # Para Google Cloud Run
+    host: str = Field(default="0.0.0.0", env="HOST")
+    
     # Banco de dados
     database_url: str = Field(
         default="postgresql://user:password@localhost:5432/vale_refeicao",
