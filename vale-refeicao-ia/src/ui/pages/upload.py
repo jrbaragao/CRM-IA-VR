@@ -165,60 +165,137 @@ def render():
             """)
 
 def process_uploaded_files(files):
-    """Processa todos os arquivos enviados"""
+    """Processa todos os arquivos enviados com logs detalhados"""
+    
+    # Container de logs visuais
+    log_container = st.empty()
+    progress_bar = st.progress(0)
+    
+    logs = []
+    
+    def add_log(icon, message, type="info"):
+        """Adiciona log visual"""
+        logs.append(f"{icon} {message}")
+        log_text = "\n".join(logs)
+        
+        if type == "error":
+            log_container.error(log_text)
+        elif type == "warning":
+            log_container.warning(log_text)
+        elif type == "success":
+            log_container.success(log_text)
+        else:
+            log_container.info(log_text)
+    
     try:
         if 'uploaded_files' not in st.session_state:
             st.session_state['uploaded_files'] = {}
         
-        for i, file in enumerate(files):
-            # Obter tamanho do arquivo
-            file.seek(0, 2)  # Ir para o final do arquivo
-            file_size_mb = file.tell() / (1024 * 1024)
-            file.seek(0)  # Voltar ao início
-            
-            # Salvar arquivo primeiro (Cloud Storage ou local)
-            file_content = file.read()
-            file.seek(0)  # Resetar para leitura do pandas
-            
-            saved_path = storage_manager.upload_file(
-                file_content,
-                file.name,
-                folder="uploads"
-            )
-            
-            if not saved_path:
-                st.error(f"❌ Erro ao salvar arquivo '{file.name}'")
-                continue
-            
-            # Ler arquivo para obter metadados
-            if file.name.endswith('.csv'):
-                # Ler CSV com tratamento especial para aspas
-                df = pd.read_csv(file, quotechar='"', skipinitialspace=True)
-                # Remover aspas dos nomes das colunas se houver
-                df.columns = df.columns.str.strip('"').str.strip()
-            else:
-                df = pd.read_excel(file)
-            
-            # Validações básicas
-            if df.empty:
-                st.warning(f"⚠️ Arquivo '{file.name}' está vazio")
-                continue
-            
-            # Armazenar no session state
-            file_key = f"file_{i}_{file.name}"
-            st.session_state['uploaded_files'][file_key] = {
-                'name': file.name,
-                'data': df,  # Mantém em memória para preview
-                'file_path': saved_path,  # Caminho no storage
-                'file_size_mb': round(file_size_mb, 2),
-                'type': 'data',  # Todos são dados agora
-                'uploaded_at': datetime.now(),
-                'rows': len(df),
-                'columns': len(df.columns),
-                'index_column': None  # Coluna de indexação
-            }
+        total_files = len(files)
+        add_log("📋", f"Iniciando processamento de {total_files} arquivo(s)...")
         
-        st.success(f"✅ {len(files)} arquivo(s) carregado(s) com sucesso!")
+        for i, file in enumerate(files):
+            try:
+                add_log("📁", f"**Arquivo {i+1}/{total_files}**: {file.name}")
+                progress_bar.progress((i) / total_files)
+                
+                # Obter tamanho do arquivo
+                add_log("📏", f"Verificando tamanho do arquivo...")
+                file.seek(0, 2)  # Ir para o final do arquivo
+                file_size_bytes = file.tell()
+                file_size_mb = file_size_bytes / (1024 * 1024)
+                file.seek(0)  # Voltar ao início
+                
+                add_log("✅", f"Tamanho: **{file_size_mb:.2f} MB** ({file_size_bytes:,} bytes)")
+                
+                # Verificar limite
+                if file_size_mb > 30:
+                    add_log("⚠️", f"**ALERTA**: Arquivo > 30MB! Cloud Run pode rejeitar.", "warning")
+                    add_log("💡", "Solução: Use a versão local ou divida o arquivo", "warning")
+                    
+                # Tentar salvar arquivo
+                add_log("💾", f"Salvando arquivo no storage...")
+                try:
+                    file_content = file.read()
+                    file.seek(0)  # Resetar para leitura do pandas
+                    
+                    add_log("☁️", f"Fazendo upload para Cloud Storage...")
+                    
+                    saved_path = storage_manager.upload_file(
+                        file_content,
+                        file.name,
+                        folder="uploads"
+                    )
+                    
+                    if not saved_path:
+                        add_log("❌", f"Erro ao salvar arquivo '{file.name}'", "error")
+                        continue
+                        
+                    add_log("✅", f"Arquivo salvo: {saved_path}", "success")
+                    
+                except Exception as e:
+                    add_log("❌", f"**ERRO ao salvar**: {str(e)}", "error")
+                    add_log("🔍", f"Tipo de erro: {type(e).__name__}", "error")
+                    
+                    if "413" in str(e) or "Payload" in str(e) or "too large" in str(e).lower():
+                        add_log("🚨", f"**ERRO 413 (Payload Too Large)**", "error")
+                        add_log("📊", f"Arquivo {file.name}: {file_size_mb:.2f}MB", "error")
+                        add_log("⚠️", f"Limite do Cloud Run: ~32MB via HTTP", "error")
+                        add_log("💡", f"**SOLUÇÃO**: Use a versão local:", "warning")
+                        add_log("💻", "```bash\ngit clone https://github.com/jrbaragao/CRM-IA-VR.git\ncd CRM-IA-VR/vale-refeicao-ia\nstreamlit run app.py\n```", "warning")
+                    continue
+                
+                # Ler arquivo para obter metadados
+                add_log("📊", f"Lendo dados para análise...")
+                
+                try:
+                    if file.name.endswith('.csv'):
+                        # Ler CSV com tratamento especial para aspas
+                        df = pd.read_csv(file, quotechar='"', skipinitialspace=True)
+                        # Remover aspas dos nomes das colunas se houver
+                        df.columns = df.columns.str.strip('"').str.strip()
+                    else:
+                        df = pd.read_excel(file)
+                    
+                    add_log("✅", f"Dados lidos: {len(df)} linhas x {len(df.columns)} colunas")
+                    
+                except Exception as e:
+                    add_log("❌", f"Erro ao ler dados: {str(e)}", "error")
+                    continue
+                
+                # Validações básicas
+                if df.empty:
+                    add_log("⚠️", f"Arquivo '{file.name}' está vazio", "warning")
+                    continue
+                
+                # Armazenar no session state
+                file_key = f"file_{i}_{file.name}"
+                st.session_state['uploaded_files'][file_key] = {
+                    'name': file.name,
+                    'data': df,  # Mantém em memória para preview
+                    'file_path': saved_path,  # Caminho no storage
+                    'file_size_mb': round(file_size_mb, 2),
+                    'type': 'data',  # Todos são dados agora
+                    'uploaded_at': datetime.now(),
+                    'rows': len(df),
+                    'columns': len(df.columns),
+                    'index_column': None  # Coluna de indexação
+                }
+                
+                add_log("🎉", f"**Arquivo processado com sucesso!**", "success")
+                
+            except Exception as e:
+                add_log("❌", f"**ERRO não tratado**: {str(e)}", "error")
+                add_log("🔍", f"Tipo de erro: {type(e).__name__}", "error")
+                import traceback
+                add_log("📝", f"```\n{traceback.format_exc()}\n```", "error")
+        
+        progress_bar.progress(1.0)
+        add_log("🏁", f"**Processamento concluído!**", "success")
+        
+        # Resumo final
+        successful = len(st.session_state.get('uploaded_files', {}))
+        add_log("📊", f"**Total processado**: {successful}/{total_files} arquivo(s)", "success" if successful == total_files else "warning")
         
         # Preview e configuração dos arquivos
         for file_key, file_info in st.session_state['uploaded_files'].items():
