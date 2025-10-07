@@ -3,15 +3,18 @@
 
 [server]
 # Tamanho máximo de upload (em MB)
-# Com HTTP/2 no Cloud Run, podemos usar limite maior
-maxUploadSize = 500
+# Testando limite muito alto para identificar onde está a real limitação
+maxUploadSize = 1000
 
-# Timeout para requisições (em segundos)
-maxMessageSize = 300
+# Timeout para requisições (em segundos)  
+maxMessageSize = 1000
 
 # Habilitar CORS
 enableCORS = false
 enableXsrfProtection = false
+
+# Força HTTP/2
+headless = true
 
 # Configurações para melhor performance
 headless = true

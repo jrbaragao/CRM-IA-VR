@@ -24,29 +24,49 @@ def render():
     # Mostrar informações sobre storage
     storage_info = storage_manager.get_storage_info()
     if storage_info['using_gcs']:
-        st.success(f"""
-        ☁️ **Cloud Storage Ativo** - Bucket: `{storage_info['bucket_name']}`
+        col1, col2 = st.columns([3, 1])
         
-        ✅ **Limite de Upload: 500MB** por arquivo
-        
-        🚀 **Com HTTP/2 habilitado no Cloud Run**
-        """)
-        
-        # Informação adicional sobre limitações
-        with st.expander("ℹ️ Informações Técnicas", expanded=False):
-            st.info("""
-            **Limites Técnicos:**
-            - ✅ Cloud Storage: até 5TB por arquivo
-            - ✅ Cloud Run HTTP/2: sem limite de payload
-            - ✅ Streamlit: configurado para 500MB
-            - ⚠️ Timeout: 5 minutos (ajustável)
+        with col1:
+            st.warning(f"""
+            ☁️ **Cloud Storage Configurado** - Bucket: `{storage_info['bucket_name']}`
             
-            **Para arquivos > 500MB:**
-            - 💻 Use a versão local para melhor performance
-            - 📂 Ou considere processamento em chunks
+            ⚠️ **LIMITE REAL: 30MB por arquivo** (limitação do Cloud Run confirmada)
             """)
+        
+        with col2:
+            if st.button("📁 Arquivos Grandes?", help="Soluções para arquivos > 30MB"):
+                st.info("""
+                ### 🚀 Soluções para Arquivos Grandes:
+                
+                **1. 💻 Versão Local (Recomendado)**
+                ```bash
+                git clone https://github.com/jrbaragao/CRM-IA-VR.git
+                cd CRM-IA-VR/vale-refeicao-ia
+                echo "OPENAI_API_KEY=sk-sua-chave" > .env
+                pip install -r requirements.txt
+                streamlit run app.py
+                ```
+                ✅ Suporte até 200MB
+                
+                **2. 📂 Dividir Arquivo**
+                - Use Excel/Python para dividir em partes < 30MB
+                - Processe cada parte separadamente
+                
+                **3. 📧 Suporte Empresarial**
+                - Upload direto para Cloud Storage (customização)
+                
+                📚 **Documentação**: `UPLOAD_ARQUIVOS_GRANDES.md`
+                """)
+        
+        # Debug - vamos descobrir de onde vem o limite
+        if st.button("🔍 Debug Upload Limits", help="Investigar de onde vem o limite real"):
+            from ...utils.debug_upload import debug_upload_limits, create_test_file
+            
+            debug_upload_limits()
+            create_test_file()
+        
     else:
-        st.info("💾 **Modo Local** - Limite de upload: **500MB** por arquivo")
+        st.info("💾 **Modo Local** - Limite de upload: **200MB** por arquivo")
     
     # Mostrar o fluxo completo com destaque visual
     st.markdown("""
