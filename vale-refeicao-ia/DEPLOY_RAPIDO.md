@@ -17,6 +17,7 @@ gcloud services enable run.googleapis.com cloudbuild.googleapis.com
 
 ### 2. Deploy da Aplicação
 
+#### Método A: Deploy Direto (Mais Simples)
 ```bash
 # Navegar até o diretório
 cd vale-refeicao-ia
@@ -33,16 +34,45 @@ gcloud run deploy crmia-agente-autonomo \
   --set-env-vars OPENAI_API_KEY=sk-sua-chave-aqui
 ```
 
-### 3. Atualizar Variáveis de Ambiente (após deploy)
+#### Método B: Usar Cloud Build (Com cloudbuild.yaml)
+```bash
+# A partir da raiz do repositório
+gcloud builds submit --config=cloudbuild.yaml
+
+# Ou a partir do subdiretório
+cd vale-refeicao-ia
+gcloud builds submit --config=cloudbuild.yaml
+```
+
+#### Método C: Commit e Push (Se tiver trigger configurado)
+```bash
+git add .
+git commit -m "deploy: atualizar aplicação"
+git push origin main
+# O trigger do Cloud Build fará deploy automaticamente
+```
+
+### 3. Configurar Trigger (Opcional - para deploy automático)
 
 ```bash
-# Atualizar a chave da OpenAI
+# Se você tem um trigger configurado, adicione a variável de ambiente:
+gcloud builds triggers update bad26627-82e1-4c91-9966-715eaf79d760 \
+  --substitutions _OPENAI_API_KEY="sk-sua-chave-aqui"
+
+# Ou configure via console:
+# https://console.cloud.google.com/cloud-build/triggers
+```
+
+### 4. Atualizar Variáveis de Ambiente (após deploy)
+
+```bash
+# Atualizar a chave da OpenAI no Cloud Run
 gcloud run services update crmia-agente-autonomo \
   --update-env-vars OPENAI_API_KEY=sk-nova-chave \
   --region southamerica-east1
 ```
 
-### 4. Ver Logs em Tempo Real
+### 5. Ver Logs em Tempo Real
 
 ```bash
 # Últimas 50 linhas
@@ -55,7 +85,7 @@ gcloud run services logs tail crmia-agente-autonomo \
   --region southamerica-east1
 ```
 
-### 5. Comandos Úteis
+### 6. Comandos Úteis
 
 ```bash
 # Listar serviços
