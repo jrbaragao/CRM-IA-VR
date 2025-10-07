@@ -1,0 +1,83 @@
+# .dockerignore na raiz do repositório
+# Otimiza o build Docker excluindo arquivos desnecessários
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv
+vale-refeicao-ia/venv/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Documentation (exceto README principal)
+*.md
+!README.md
+vale-refeicao-ia/docs/
+
+# Tests
+tests/
+test_*.py
+*_test.py
+pytest.ini
+.pytest_cache/
+
+# Docker
+docker-compose.yml
+*.dockerignore
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# Env files
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+tatus
+tatus -sb
+SitesCursorCRMIA-VRvale-refeicao-ia
+
+# Batch/Scripts de desenvolvimento
+*.ps1
+*.sh
+atualizar-trigger.yaml
+cloudbuild.yaml
+
+# Não incluir banco de dados no build
+*.db
+*.sqlite3
