@@ -13,9 +13,6 @@ maxMessageSize = 1000
 enableCORS = false
 enableXsrfProtection = false
 
-# Força HTTP/2
-headless = true
-
 # Configurações para melhor performance
 headless = true
 runOnSave = false
