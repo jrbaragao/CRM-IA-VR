@@ -219,7 +219,7 @@ gcloud run deploy crmia-agente-autonomo \
   --set-env-vars OPENAI_API_KEY=sk-sua-chave-aqui
 ```
 
-#### **Configurar Cloud Storage (para uploads > 30MB):**
+#### **Configurar Cloud Storage (para uploads grandes):**
 ```bash
 # 1. Criar bucket
 gcloud storage buckets create gs://seu-bucket-uploads \

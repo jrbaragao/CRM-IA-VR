@@ -1,6 +1,6 @@
 """
 Utilitário para gerenciar uploads no Google Cloud Storage
-Para arquivos grandes que excedem o limite HTTP do Cloud Run (32MB)
+Para arquivos grandes e persistência de dados na nuvem
 """
 
 import os
