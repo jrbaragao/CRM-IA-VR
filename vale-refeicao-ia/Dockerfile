@@ -2,17 +2,26 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Instalar dependências do sistema
+# Instalar dependências do sistema necessárias para build
 RUN apt-get update && apt-get install -y \
     build-essential \
     curl \
+    git \
+    libpq-dev \
+    gcc \
+    g++ \
     && rm -rf /var/lib/apt/lists/*
 
 # Copiar arquivos de requisitos
 COPY requirements.txt .
 
+# Remover dependências específicas do Windows que causam falha no Linux
+RUN sed -i '/pyreadline3/d' requirements.txt && \
+    sed -i '/pywin32/d' requirements.txt
+
 # Instalar dependências Python
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
 # Copiar código da aplicação
 COPY . .

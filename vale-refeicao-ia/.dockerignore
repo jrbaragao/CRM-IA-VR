@@ -43,12 +43,15 @@ test_*.py
 pytest.ini
 .pytest_cache/
 
-# Dados temporários
+# Dados temporários (manter estrutura de diretórios mas não os arquivos)
 uploads/*
+!uploads/.gitkeep
 exports/*
+!exports/.gitkeep
 *.db
 *.sqlite3
 chroma_db/*
+!chroma_db/.gitkeep
 
 # Docker
 Dockerfile
