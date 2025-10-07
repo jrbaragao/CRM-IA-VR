@@ -3,11 +3,11 @@
 
 [server]
 # Tamanho máximo de upload (em MB)
-# Com Cloud Storage, podemos aceitar até 500MB
-maxUploadSize = 500
+# Cloud Run tem limite de 32MB, configurando 30MB para segurança
+maxUploadSize = 30
 
 # Timeout para requisições (em segundos)
-maxMessageSize = 500
+maxMessageSize = 30
 
 # Habilitar CORS
 enableCORS = false

@@ -24,9 +24,40 @@ def render():
     # Mostrar informações sobre storage
     storage_info = storage_manager.get_storage_info()
     if storage_info['using_gcs']:
-        st.info(f"☁️ **Cloud Storage ativo** - Limite de upload: **500MB** por arquivo (Bucket: `{storage_info['bucket_name']}`)")
+        with st.container():
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.warning(f"""
+                ☁️ **Cloud Storage Configurado** - Bucket: `{storage_info['bucket_name']}`
+                
+                ⚠️ **LIMITE ATUAL: 30MB por arquivo** (limitação do Cloud Run)
+                """)
+            with col2:
+                if st.button("📁 Arquivos Grandes?", help="Clique para ver soluções para arquivos > 30MB"):
+                    st.info("""
+                    ### 🚀 Soluções para Arquivos Grandes:
+                    
+                    **1. 💻 Versão Local (Recomendado)**
+                    ```bash
+                    git clone [repo]
+                    cd vale-refeicao-ia
+                    echo "OPENAI_API_KEY=sk-sua-chave" > .env
+                    pip install -r requirements.txt
+                    streamlit run app.py
+                    ```
+                    ✅ Suporte até 200MB
+                    
+                    **2. 📂 Dividir Arquivo**
+                    - Use Excel/Python para dividir em partes < 30MB
+                    - Processe cada parte separadamente
+                    
+                    **3. 📧 Suporte**
+                    - Para casos empresariais específicos
+                    
+                    📚 **Veja `UPLOAD_ARQUIVOS_GRANDES.md` para instruções detalhadas**
+                    """)
     else:
-        st.warning("💾 **Modo Local** - Limite de upload: **200MB** por arquivo")
+        st.info("💾 **Modo Local** - Limite de upload: **200MB** por arquivo")
     
     # Mostrar o fluxo completo com destaque visual
     st.markdown("""
