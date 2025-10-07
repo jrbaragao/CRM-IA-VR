@@ -15,10 +15,18 @@ from ..components import (
     render_metrics_row
 )
 from ...config.settings import settings
+from ...utils.cloud_storage import storage_manager
 
 def render():
     """Renderiza página de upload"""
     st.header("📤 Upload de Dados")
+    
+    # Mostrar informações sobre storage
+    storage_info = storage_manager.get_storage_info()
+    if storage_info['using_gcs']:
+        st.info(f"☁️ **Cloud Storage ativo** - Limite de upload: **500MB** por arquivo (Bucket: `{storage_info['bucket_name']}`)")
+    else:
+        st.warning("💾 **Modo Local** - Limite de upload: **200MB** por arquivo")
     
     # Mostrar o fluxo completo com destaque visual
     st.markdown("""
@@ -123,7 +131,26 @@ def process_uploaded_files(files):
             st.session_state['uploaded_files'] = {}
         
         for i, file in enumerate(files):
-            # Ler arquivo
+            # Obter tamanho do arquivo
+            file.seek(0, 2)  # Ir para o final do arquivo
+            file_size_mb = file.tell() / (1024 * 1024)
+            file.seek(0)  # Voltar ao início
+            
+            # Salvar arquivo primeiro (Cloud Storage ou local)
+            file_content = file.read()
+            file.seek(0)  # Resetar para leitura do pandas
+            
+            saved_path = storage_manager.upload_file(
+                file_content,
+                file.name,
+                folder="uploads"
+            )
+            
+            if not saved_path:
+                st.error(f"❌ Erro ao salvar arquivo '{file.name}'")
+                continue
+            
+            # Ler arquivo para obter metadados
             if file.name.endswith('.csv'):
                 # Ler CSV com tratamento especial para aspas
                 df = pd.read_csv(file, quotechar='"', skipinitialspace=True)
@@ -141,7 +168,9 @@ def process_uploaded_files(files):
             file_key = f"file_{i}_{file.name}"
             st.session_state['uploaded_files'][file_key] = {
                 'name': file.name,
-                'data': df,
+                'data': df,  # Mantém em memória para preview
+                'file_path': saved_path,  # Caminho no storage
+                'file_size_mb': round(file_size_mb, 2),
                 'type': 'data',  # Todos são dados agora
                 'uploaded_at': datetime.now(),
                 'rows': len(df),
@@ -154,7 +183,8 @@ def process_uploaded_files(files):
         # Preview e configuração dos arquivos
         for file_key, file_info in st.session_state['uploaded_files'].items():
             if file_key.startswith('file_'):
-                with st.expander(f"📊 {file_info['name']} ({file_info['rows']} linhas, {file_info['columns']} colunas)", expanded=False):
+                storage_icon = "☁️" if file_info.get('file_path', '').startswith('gs://') else "💾"
+                with st.expander(f"📊 {file_info['name']} - {file_info.get('file_size_mb', 0)}MB {storage_icon} ({file_info['rows']} linhas, {file_info['columns']} colunas)", expanded=False):
                     # Preview dos dados
                     st.dataframe(file_info['data'].head(), use_container_width=True)
                     
