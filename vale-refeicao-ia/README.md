@@ -179,7 +179,99 @@ streamlit run app.py --server.runOnSave true
 - Instalação de novas dependências (pip install)
 - Alterações em imports ou estrutura de arquivos
 
-## 🚀 Quick Start
+## 🌐 Deploy em Produção (Google Cloud Run)
+
+### ☁️ **Sistema Rodando na Nuvem**
+
+A aplicação está otimizada para rodar no **Google Cloud Run** com suporte completo a:
+
+- **📦 Build Automático**: Docker otimizado para Linux/Cloud
+- **☁️ Cloud Storage**: Upload de arquivos até 500MB
+- **🔐 Autenticação Automática**: Service Account gerenciada
+- **⚡ Escalabilidade**: Auto-scaling baseado em demanda
+- **🌍 Acesso Global**: URL pública HTTPS
+
+### 🚀 **Como Fazer Deploy**
+
+#### **Pré-requisitos:**
+```bash
+# 1. Instalar Google Cloud SDK
+# Download: https://cloud.google.com/sdk/docs/install
+
+# 2. Fazer login
+gcloud auth login
+gcloud config set project SEU_PROJECT_ID
+```
+
+#### **Deploy Rápido:**
+```bash
+cd vale-refeicao-ia
+
+# Deploy automático (Cloud Run faz build e deploy)
+gcloud run deploy crmia-agente-autonomo \
+  --source . \
+  --platform managed \
+  --region southamerica-east1 \
+  --allow-unauthenticated \
+  --memory 2Gi \
+  --cpu 2 \
+  --timeout 600 \
+  --set-env-vars OPENAI_API_KEY=sk-sua-chave-aqui
+```
+
+#### **Configurar Cloud Storage (para uploads > 30MB):**
+```bash
+# 1. Criar bucket
+gcloud storage buckets create gs://seu-bucket-uploads \
+  --location=southamerica-east1
+
+# 2. Configurar variáveis no Cloud Run
+gcloud run services update crmia-agente-autonomo \
+  --region=southamerica-east1 \
+  --set-env-vars \
+    GCS_BUCKET_NAME=seu-bucket-uploads,\
+    GCP_PROJECT_ID=seu-project-id
+```
+
+### 📊 **Recursos do Cloud Storage**
+
+```python
+Storage Inteligente:
+├── ☁️ Produção (Cloud Run)
+│   ├── Upload direto para Google Cloud Storage
+│   ├── Limite: 500MB por arquivo
+│   ├── Persistência: Dados mantidos entre deploys
+│   └── Performance: Alta disponibilidade
+└── 💾 Desenvolvimento (Local)
+    ├── Salvamento em disco local
+    ├── Limite: 200MB por arquivo
+    └── Ideal para testes
+```
+
+### 🔧 **Variáveis de Ambiente Necessárias**
+
+```env
+# Obrigatórias
+OPENAI_API_KEY=sk-sua-chave-openai
+
+# Opcionais (Cloud Storage)
+GCS_BUCKET_NAME=seu-bucket-uploads
+GCP_PROJECT_ID=seu-project-id
+
+# Configurações
+OPENAI_MODEL=gpt-4-turbo-preview
+DATABASE_URL=sqlite:///./vale_refeicao.db
+```
+
+### 📚 **Documentação Completa de Deploy**
+
+- **`DEPLOY_RAPIDO.md`** - Comandos prontos para deploy
+- **`PROBLEMA_BUILD_RESOLVIDO.md`** - Soluções de problemas comuns
+- **`INSTRUCOES_FINAIS.md`** - Guia completo passo a passo
+
+---
+
+## 🚀 Quick Start (Desenvolvimento Local)
 
 ### ⚡ Instalação Rápida (SQLite)
 
@@ -235,17 +327,29 @@ vale-refeicao-ia/
 │   ├── 💾 data/
 │   │   ├── database.py               # Gerenciador dinâmico
 │   │   └── models.py                 # Modelos simplificados
+│   ├── 🛠️ utils/
+│   │   ├── cloud_storage.py          # ☁️ Gerenciador Cloud Storage
+│   │   ├── excel_generator.py        # Geração de Excel
+│   │   ├── eda_tool.py               # Análise exploratória
+│   │   └── python_executor.py        # Executor de código
 │   └── 🎨 ui/
 │       ├── components.py             # Componentes reutilizáveis
 │       └── pages/                    # Páginas da aplicação
-│           ├── upload.py             # Upload unificado
+│           ├── upload.py             # Upload com Cloud Storage
 │           ├── processing.py         # Processamento dinâmico
 │           ├── database_viewer.py    # Visualizador avançado
 │           ├── calculations.py       # Cálculos por IA
 │           ├── prompts_manager.py    # Gerenciador de prompts
 │           └── agent_monitor.py      # Monitor de agentes
+├── 🐳 Dockerfile                      # Container otimizado
+├── 🐳 .dockerignore                   # Otimização de build
+├── ☁️ cloudbuild.yaml                 # Config Cloud Build
+├── ⚙️ .streamlit/config.toml          # Config Streamlit (500MB upload)
 ├── ⚙️ configurar_sqlite.ps1          # Setup automático
-└── 📚 docs/                          # Documentação
+└── 📚 docs/                          # Documentação completa
+    ├── DEPLOY_RAPIDO.md              # Deploy Cloud Run
+    ├── INSTRUCOES_FINAIS.md          # Guia completo
+    └── PROBLEMA_BUILD_RESOLVIDO.md   # Troubleshooting
 ```
 
 ## 🎯 Como Usar o Novo Sistema
@@ -265,9 +369,14 @@ graph LR
 📤 Upload de Dados
 ├── 📁 Selecione múltiplos arquivos (CSV, Excel)
 ├── 🔑 Defina coluna de indexação personalizada
-├── ✅ Arquivos são APENAS carregados na memória
+├── ✅ Arquivos carregados automaticamente
 ├── 📊 Preview dos dados
-├── ⚡ Suporte a arquivos até 500MB
+├── ⚡ Suporte a arquivos:
+│   ├── ☁️ Cloud Storage (Cloud Run): até 500MB
+│   └── 💾 Local (desenvolvimento): até 200MB
+├── 🔄 Storage inteligente:
+│   ├── ☁️ Produção → Google Cloud Storage
+│   └── 💾 Local → Disco local
 └── ➡️ IMPORTANTE: Vá para "Preparação de Dados" após upload
 ```
 
@@ -919,4 +1028,15 @@ streamlit run app.py
 ```
 
 **Transforme seus dados em insights com o poder dos Agentes de IA Autônomos!** 🤖✨
-# Atualiza��o for�ada 09/18/2025 20:53:34
+
+---
+
+## 📊 Status do Projeto
+
+- ✅ **Produção**: Rodando no Google Cloud Run
+- ✅ **Cloud Storage**: Suporte a uploads de até 500MB
+- ✅ **CI/CD**: Deploy automático via GitHub
+- ✅ **Escalabilidade**: Auto-scaling habilitado
+- ✅ **Documentação**: Completa e atualizada
+
+**Última atualização**: 07/10/2025

@@ -730,11 +730,12 @@ def generate_eda_code(question: str, table_info: Dict[str, List[str]]) -> str:
             code = generate_eda_code_with_llm(question, table_info)
             
             if 'agent_logs' in st.session_state:
+                num_lines = len(code.split('\n'))
                 st.session_state['agent_logs'].append({
                     'timestamp': datetime.now().strftime('%H:%M:%S'),
                     'agent': 'code_generator',
                     'action': '✅ Código gerado com sucesso',
-                    'details': f"{len(code.split('\\n'))} linhas de código"
+                    'details': f"{num_lines} linhas de código"
                 })
             
             return code
