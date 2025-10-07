@@ -24,40 +24,29 @@ def render():
     # Mostrar informações sobre storage
     storage_info = storage_manager.get_storage_info()
     if storage_info['using_gcs']:
-        with st.container():
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                st.warning(f"""
-                ☁️ **Cloud Storage Configurado** - Bucket: `{storage_info['bucket_name']}`
-                
-                ⚠️ **LIMITE ATUAL: 30MB por arquivo** (limitação do Cloud Run)
-                """)
-            with col2:
-                if st.button("📁 Arquivos Grandes?", help="Clique para ver soluções para arquivos > 30MB"):
-                    st.info("""
-                    ### 🚀 Soluções para Arquivos Grandes:
-                    
-                    **1. 💻 Versão Local (Recomendado)**
-                    ```bash
-                    git clone [repo]
-                    cd vale-refeicao-ia
-                    echo "OPENAI_API_KEY=sk-sua-chave" > .env
-                    pip install -r requirements.txt
-                    streamlit run app.py
-                    ```
-                    ✅ Suporte até 200MB
-                    
-                    **2. 📂 Dividir Arquivo**
-                    - Use Excel/Python para dividir em partes < 30MB
-                    - Processe cada parte separadamente
-                    
-                    **3. 📧 Suporte**
-                    - Para casos empresariais específicos
-                    
-                    📚 **Veja `UPLOAD_ARQUIVOS_GRANDES.md` para instruções detalhadas**
-                    """)
+        st.success(f"""
+        ☁️ **Cloud Storage Ativo** - Bucket: `{storage_info['bucket_name']}`
+        
+        ✅ **Limite de Upload: 500MB** por arquivo
+        
+        🚀 **Com HTTP/2 habilitado no Cloud Run**
+        """)
+        
+        # Informação adicional sobre limitações
+        with st.expander("ℹ️ Informações Técnicas", expanded=False):
+            st.info("""
+            **Limites Técnicos:**
+            - ✅ Cloud Storage: até 5TB por arquivo
+            - ✅ Cloud Run HTTP/2: sem limite de payload
+            - ✅ Streamlit: configurado para 500MB
+            - ⚠️ Timeout: 5 minutos (ajustável)
+            
+            **Para arquivos > 500MB:**
+            - 💻 Use a versão local para melhor performance
+            - 📂 Ou considere processamento em chunks
+            """)
     else:
-        st.info("💾 **Modo Local** - Limite de upload: **200MB** por arquivo")
+        st.info("💾 **Modo Local** - Limite de upload: **500MB** por arquivo")
     
     # Mostrar o fluxo completo com destaque visual
     st.markdown("""

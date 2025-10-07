@@ -3,15 +3,19 @@
 
 [server]
 # Tamanho máximo de upload (em MB)
-# Cloud Run tem limite de 32MB, configurando 30MB para segurança
-maxUploadSize = 30
+# Com HTTP/2 no Cloud Run, podemos usar limite maior
+maxUploadSize = 500
 
 # Timeout para requisições (em segundos)
-maxMessageSize = 30
+maxMessageSize = 300
 
 # Habilitar CORS
 enableCORS = false
 enableXsrfProtection = false
+
+# Configurações para melhor performance
+headless = true
+runOnSave = false
 
 [browser]
 # Não coletar estatísticas de uso
