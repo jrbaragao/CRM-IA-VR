@@ -1,19 +1,22 @@
-[theme]
-primaryColor = "#667eea"
-backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#f0f2f6"
-textColor = "#262730"
-font = "sans serif"
+# Streamlit Configuration
+# https://docs.streamlit.io/library/advanced-features/configuration
 
 [server]
-headless = true
+# Tamanho máximo de upload (em MB)
+# Cloud Run tem limite de 32MB por requisição HTTP, mas podemos tentar até 30MB
+maxUploadSize = 30
+
+# Timeout para requisições (em segundos)
+maxMessageSize = 30
+
+# Habilitar CORS
 enableCORS = false
-enableXsrfProtection = true
-maxUploadSize = 500
+enableXsrfProtection = false
 
 [browser]
+# Não coletar estatísticas de uso
 gatherUsageStats = false
 
-[client]
-showErrorDetails = true
-toolbarMode = "minimal"
+[theme]
+# Tema padrão
+base = "light"

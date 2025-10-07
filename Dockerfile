@@ -30,6 +30,9 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copiar código da aplicação do subdiretório
 COPY vale-refeicao-ia/ .
 
+# Copiar configuração do Streamlit
+COPY vale-refeicao-ia/.streamlit .streamlit/
+
 # Criar diretórios necessários com permissões adequadas
 RUN mkdir -p uploads exports chroma_db && \
     chmod -R 777 uploads exports chroma_db
