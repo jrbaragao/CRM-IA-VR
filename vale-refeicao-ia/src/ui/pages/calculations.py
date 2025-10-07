@@ -40,7 +40,8 @@ def render():
     tabs = st.tabs([
         "⚙️ Configurar Cálculos",
         "🚀 Executar Cálculos", 
-        "📊 Histórico de Cálculos"
+        "📊 Histórico de Cálculos",
+        "💬 Chat com IA"
     ])
     
     # Renderizar conteúdo baseado na tab ativa
@@ -52,6 +53,8 @@ def render():
                 render_calculation_execution_tab(db, data_tables)
             elif idx == 2:
                 render_calculation_history_tab(db)
+            elif idx == 3:
+                render_chat_tab(db, data_tables)
 
 def render_calculation_config_tab(db, data_tables):
     """Renderiza aba de configuração de cálculos"""
@@ -491,3 +494,252 @@ def execute_autonomous_calculation(db, data_tables, config, container):
                 "✅ Cálculo autônomo concluído",
                 {"configuracao": config['name']}
             )
+
+def render_chat_tab(db, data_tables):
+    """Renderiza aba de chat interativo com IA"""
+    
+    st.markdown("### 💬 Chat Interativo com IA")
+    st.caption("Converse com o agente inteligente e explore seus dados de forma interativa")
+    
+    # Inicializar histórico de chat se não existir
+    if 'chat_messages' not in st.session_state:
+        st.session_state.chat_messages = []
+    
+    if 'chat_context' not in st.session_state:
+        st.session_state.chat_context = {
+            'findings': [],
+            'previous_queries': [],
+            'data_explored': []
+        }
+    
+    # Container para configurações
+    with st.container():
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            st.markdown("#### 🛠️ Ferramentas Disponíveis")
+            
+            # Seleção de ferramentas
+            available_tools = [
+                "sql_query",
+                "eda_analysis", 
+                "excel_export",
+                "correlation_analysis",
+                "statistical_summary"
+            ]
+            
+            selected_tools = st.multiselect(
+                "Selecione as ferramentas que o agente pode usar:",
+                options=available_tools,
+                default=["sql_query", "eda_analysis"],
+                help="Escolha quais ferramentas o agente pode utilizar durante a conversa"
+            )
+        
+        with col2:
+            st.markdown("#### ⚙️ Configurações")
+            
+            # Opções de configuração
+            show_reasoning = st.checkbox("Mostrar raciocínio do agente", value=False)
+            max_iterations = st.slider("Máximo de iterações por pergunta", 1, 10, 5)
+            
+            # Botão para limpar chat
+            if st.button("🗑️ Limpar Conversa", type="secondary"):
+                st.session_state.chat_messages = []
+                st.session_state.chat_context = {
+                    'findings': [],
+                    'previous_queries': [],
+                    'data_explored': []
+                }
+                st.rerun()
+    
+    st.markdown("---")
+    
+    # Exibir histórico de chat
+    chat_container = st.container()
+    with chat_container:
+        for message in st.session_state.chat_messages:
+            with st.chat_message(message["role"], avatar=message.get("avatar")):
+                if message["role"] == "user":
+                    st.markdown(message["content"])
+                else:
+                    # Para mensagens do assistant, renderizar conteúdo complexo
+                    if isinstance(message["content"], dict):
+                        # Texto principal
+                        if "text" in message["content"]:
+                            st.markdown(message["content"]["text"])
+                        
+                        # Gráficos
+                        if "plots" in message["content"] and message["content"]["plots"]:
+                            for plot in message["content"]["plots"]:
+                                st.image(f"data:image/png;base64,{plot['image']}", 
+                                       caption=plot.get('title', 'Gráfico'))
+                        
+                        # Tabelas
+                        if "tables" in message["content"] and message["content"]["tables"]:
+                            for table in message["content"]["tables"]:
+                                st.dataframe(table["data"])
+                        
+                        # Insights
+                        if "insights" in message["content"] and message["content"]["insights"]:
+                            with st.expander("💡 Insights Descobertos", expanded=True):
+                                for insight in message["content"]["insights"]:
+                                    st.write(f"• {insight}")
+                    else:
+                        st.markdown(message["content"])
+    
+    # Input do usuário
+    if prompt := st.chat_input("Digite sua pergunta sobre os dados..."):
+        # Adicionar mensagem do usuário
+        st.session_state.chat_messages.append({
+            "role": "user",
+            "content": prompt,
+            "avatar": "🧑‍💻"
+        })
+        
+        # Adicionar à lista de queries anteriores
+        st.session_state.chat_context['previous_queries'].append(prompt)
+        
+        # Rerun para mostrar a mensagem do usuário
+        st.rerun()
+    
+    # Processar resposta se houver nova mensagem
+    if st.session_state.chat_messages and st.session_state.chat_messages[-1]["role"] == "user":
+        with st.chat_message("assistant", avatar="🤖"):
+            with st.spinner("Analisando sua pergunta..."):
+                # Container para a resposta
+                response_container = st.container()
+                
+                # Executar análise
+                response = execute_chat_analysis(
+                    db, 
+                    data_tables, 
+                    st.session_state.chat_messages[-1]["content"],
+                    selected_tools,
+                    st.session_state.chat_context,
+                    show_reasoning,
+                    max_iterations,
+                    response_container
+                )
+                
+                # Adicionar resposta ao histórico
+                st.session_state.chat_messages.append({
+                    "role": "assistant",
+                    "content": response,
+                    "avatar": "🤖"
+                })
+
+def execute_chat_analysis(db, data_tables, query, tools, context, show_reasoning, max_iterations, container):
+    """Executa análise para o chat interativo"""
+    
+    from .database_viewer import execute_autonomous_agent
+    import json
+    
+    # Construir prompt com contexto
+    context_summary = ""
+    if context['previous_queries']:
+        context_summary = f"\nCONTEXTO DA CONVERSA:\n"
+        for i, prev_query in enumerate(context['previous_queries'][-5:], 1):  # Últimas 5 perguntas
+            context_summary += f"{i}. {prev_query}\n"
+    
+    if context['findings']:
+        context_summary += f"\nDESCOBERTAS ANTERIORES:\n"
+        for finding in context['findings'][-3:]:  # Últimas 3 descobertas
+            context_summary += f"- {finding}\n"
+    
+    # Prompt aprimorado para o agente
+    enhanced_prompt = f"""
+    CONTEXTO: Você é um assistente de análise de dados conversacional e inteligente.
+    {context_summary}
+    
+    PERGUNTA ATUAL: {query}
+    
+    INSTRUÇÕES:
+    1. Responda de forma clara e direta
+    2. Use as ferramentas disponíveis para obter dados precisos
+    3. Se gráficos forem solicitados, gere-os usando Python/matplotlib
+    4. Mantenha o contexto da conversa em mente
+    5. Seja conciso mas completo
+    
+    FERRAMENTAS DISPONÍVEIS: {', '.join(tools)}
+    """
+    
+    # Configuração para o agente
+    config = {
+        'available_tools': tools,
+        'show_reasoning': show_reasoning,
+        'max_iterations': max_iterations,
+        'enable_ai': True,
+        'max_turn_limit': max_iterations,
+        'exploration_depth': 'Intermediária',  # Valor padrão para profundidade
+        'include_insights': True,
+        'analysis_approach': 'comprehensive'
+    }
+    
+    # Container temporário para capturar a saída
+    # Limpar análises anteriores
+    if 'agent_analyses' in st.session_state:
+        prev_count = len(st.session_state.agent_analyses)
+    else:
+        prev_count = 0
+    
+    with container:
+        success = execute_autonomous_agent(db, data_tables, enhanced_prompt, config, container)
+    
+    # Processar resultado
+    if success and 'agent_analyses' in st.session_state and len(st.session_state.agent_analyses) > prev_count:
+        # Pegar a última análise
+        results = st.session_state.agent_analyses[-1]
+        
+        # Extrair componentes da resposta
+        response_content = {
+            "text": "",
+            "plots": [],
+            "tables": [],
+            "insights": []
+        }
+        
+        # Extrair resposta final
+        final_step = None
+        for step in results.get('steps', []):
+            if step.get('action') == 'Síntese Final':
+                final_step = step
+                break
+        
+        if final_step and 'result' in final_step:
+            response_content['text'] = final_step['result'].get('final_answer', 'Análise concluída.')
+        
+        # Extrair gráficos e insights de todas as etapas
+        for step in results.get('steps', []):
+            if isinstance(step, dict) and 'result' in step:
+                result = step['result']
+                if isinstance(result, dict):
+                    # Extrair plots
+                    if result.get('plots'):
+                        response_content['plots'].extend(result['plots'])
+                    
+                    # Extrair insights
+                    if result.get('insights'):
+                        for insight in result['insights']:
+                            if isinstance(insight, str):
+                                response_content['insights'].append(insight)
+                            elif isinstance(insight, dict) and 'text' in insight:
+                                response_content['insights'].append(insight['text'])
+                    
+                    # Extrair tabelas de resultados SQL
+                    if result.get('query_result') and isinstance(result['query_result'], list):
+                        response_content['tables'].append({
+                            'data': pd.DataFrame(result['query_result']),
+                            'title': result.get('target_table', 'Resultado SQL')
+                        })
+        
+        # Atualizar contexto
+        context['findings'].append(response_content['text'])
+        
+        return response_content
+    else:
+        return {
+            "text": "Desculpe, não consegui processar sua pergunta. Por favor, tente reformulá-la.",
+            "plots": [],
+            "tables": [],
+            "insights": []
+        }

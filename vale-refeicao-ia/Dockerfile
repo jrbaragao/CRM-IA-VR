@@ -17,12 +17,21 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copiar código da aplicação
 COPY . .
 
-# Criar diretórios necessários
-RUN mkdir -p uploads exports chroma_db
+# Criar diretórios necessários com permissões adequadas
+RUN mkdir -p uploads exports chroma_db && \
+    chmod -R 777 uploads exports chroma_db
 
-# Expor porta do Streamlit (dinâmica para cloud)
-EXPOSE $PORT
+# Expor porta padrão (Cloud Run usa a variável de ambiente PORT)
 EXPOSE 8501
 
+# Configurar variáveis de ambiente do Streamlit
+ENV STREAMLIT_SERVER_PORT=8501 \
+    STREAMLIT_SERVER_ADDRESS=0.0.0.0 \
+    STREAMLIT_SERVER_HEADLESS=true \
+    STREAMLIT_SERVER_FILE_WATCHER_TYPE=none \
+    STREAMLIT_SERVER_ENABLE_CORS=false \
+    STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION=false
+
 # Comando para executar a aplicação
-CMD ["sh", "-c", "streamlit run app.py --server.port=${PORT:-8501} --server.address=0.0.0.0 --server.headless=true --server.fileWatcherType=none --server.enableCORS=false"]
+# Cloud Run define PORT automaticamente, usamos 8501 como fallback
+CMD streamlit run app.py --server.port=${PORT:-8501} --server.address=0.0.0.0
