@@ -8,29 +8,37 @@
 
 ### ✅ Problema 2: Dockerfile não encontrado
 **Erro**: `lstat /workspace/Dockerfile: no such file or directory`  
-**Solução**: Criado `cloudbuild.yaml` especificando contexto correto
+**Causa**: Trigger do Cloud Build procurava Dockerfile na raiz, mas estava em `vale-refeicao-ia/`  
+**Solução**: Criado `Dockerfile` na raiz que copia de `vale-refeicao-ia/`
+
+### ✅ Problema 3: Trigger com configuração inline
+**Causa**: Trigger tinha build config inline que ignorava `cloudbuild.yaml`  
+**Solução**: Dockerfile na raiz resolve o problema sem precisar modificar o trigger
 
 ## 📁 Arquivos Criados/Modificados
 
 ```
 CRMIA-VR/
-├── cloudbuild.yaml                    ← ✅ NOVO: Config raiz
+├── Dockerfile                         ← ✅ NOVO: Dockerfile proxy na raiz
+├── .dockerignore                      ← ✅ NOVO: Ignora arquivos desnecessários
+├── cloudbuild.yaml                    ← ✅ NOVO: Config Cloud Build (opcional)
 │
 └── vale-refeicao-ia/
     ├── Dockerfile                     ← ✏️ MODIFICADO: Remove deps Windows
     ├── .dockerignore                  ← ✅ NOVO: Otimiza build
-    ├── cloudbuild.yaml                ← ✅ NOVO: Config subdiretório
+    ├── cloudbuild.yaml                ← ✅ NOVO: Config para build manual
     ├── requirements-docker.txt        ← ✅ NOVO: Deps essenciais
     │
+    ├── deploy-agora.ps1               ← ✅ NOVO: Script deploy interativo
+    ├── deploy-agora.sh                ← ✅ NOVO: Script deploy Linux/Mac
     ├── testar-build.ps1               ← ✅ NOVO: Script teste Windows
     ├── testar-build.sh                ← ✅ NOVO: Script teste Linux
-    ├── ver-logs-build.ps1             ← ✅ NOVO: Ver logs detalhados
     │
     └── Documentação:
         ├── DEPLOY_RAPIDO.md           ← ✏️ ATUALIZADO: 3 métodos deploy
         ├── DEPLOY_CLOUD_RUN.md        ← ✅ NOVO: Guia completo
-        ├── PROBLEMA_BUILD_RESOLVIDO.md        ← ✅ NOVO: Problema 1
-        ├── SOLUCAO_DOCKERFILE_NAO_ENCONTRADO.md  ← ✅ NOVO: Problema 2
+        ├── PROBLEMA_BUILD_RESOLVIDO.md    ← ✅ NOVO: Problema 1
+        ├── INSTRUCOES_FINAIS.md       ← ✏️ ATUALIZADO: Este arquivo
         └── RESUMO_CORRECOES.md        ← ✅ NOVO: Resumo geral
 ```
 
