@@ -110,6 +110,53 @@ class CloudStorageManager:
                 st.error(f"Erro ao salvar arquivo localmente: {e}")
                 return None
 
+    def _sign_blob_via_iam_api(self, blob_to_sign: bytes, sa_email: str) -> Optional[str]:
+        """
+        Assina um blob usando a IAM Credentials API REST diretamente.
+        Retorna a assinatura em base64 ou None se falhar.
+        """
+        try:
+            # Obter token de acesso atual
+            credentials = getattr(self.client, "_credentials", None)
+            if credentials is None:
+                return None
+            
+            # Garantir que o token está válido
+            from google.auth.transport.requests import Request as AuthRequest
+            if not credentials.valid:
+                credentials.refresh(AuthRequest())
+            
+            access_token = credentials.token
+            
+            # Chamar IAM Credentials API para assinar
+            import base64
+            url = f"https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/{sa_email}:signBlob"
+            
+            payload = {
+                "payload": base64.b64encode(blob_to_sign).decode('utf-8')
+            }
+            
+            resp = requests.post(
+                url,
+                json=payload,
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json"
+                },
+                timeout=10
+            )
+            
+            if resp.status_code != 200:
+                st.error(f"IAM signBlob retornou {resp.status_code}: {resp.text}")
+                return None
+            
+            result = resp.json()
+            return result.get('signedBlob')
+            
+        except Exception as e:
+            st.error(f"Erro ao assinar via IAM API: {e}")
+            return None
+
     def generate_signed_upload_url(self, object_name: str, expiration_minutes: int = 30, content_type: Optional[str] = None) -> Optional[str]:
         """
         Gera uma Signed URL (V4) para upload direto via HTTP PUT para o objeto informado.
@@ -137,13 +184,11 @@ class CloudStorageManager:
                 )
                 return url
             except AttributeError:
-                # Credenciais sem chave privada (ComputeEngineCredentials)
                 pass
-            except Exception as e:
-                # Outros erros, continua para fallback IAM
-                st.warning(f"Tentativa de assinatura local falhou: {e}")
+            except Exception:
+                pass
 
-            # 2) Fallback: assinatura via IAM (sem chave privada)
+            # 2) Fallback: construir Signed URL manualmente usando IAM API para assinar
             sa_email = self._get_service_account_email()
             if not sa_email:
                 raise RuntimeError(
@@ -151,49 +196,48 @@ class CloudStorageManager:
                     "Verifique se está rodando no Cloud Run."
                 )
 
-            # Obtém as credenciais atuais
-            credentials = getattr(self.client, "_credentials", None)
-            if credentials is None:
-                raise RuntimeError("Credenciais não disponíveis no cliente GCS")
-
-            # Cria um signing request que usa IAM Credentials API
-            from google.auth import iam
-            from google.auth.transport import requests as auth_requests
+            # Construir string canônica para assinatura (Signed URL V4)
+            import urllib.parse
+            from datetime import timezone
             
-            signing_request = auth_requests.Request()
+            expiration_timestamp = int((datetime.datetime.now(timezone.utc) + expiration).timestamp())
             
-            # Tenta usar google.auth.iam.Signer para assinar via IAM
-            try:
-                from google.auth.iam import Signer
-                
-                signer = Signer(
-                    request=signing_request,
-                    credentials=credentials,
-                    service_account_email=sa_email
-                )
-                
-                # Gera URL assinada usando o signer IAM
-                url = blob.generate_signed_url(
-                    version="v4",
-                    expiration=expiration,
-                    method="PUT",
-                    content_type=content_type,
-                    service_account_email=sa_email,
-                    access_token=None,  # Força uso do signer
-                    credentials=signer,
-                )
-                return url
-                
-            except Exception as iam_error:
-                st.error(f"Erro ao usar IAM Signer: {iam_error}")
-                raise RuntimeError(
-                    f"Falha na assinatura via IAM: {iam_error}\n\n"
-                    "Verifique:\n"
-                    "1. API 'IAM Service Account Credentials' está habilitada\n"
-                    "2. Service Account tem papel 'Service Account Token Creator' sobre ela mesma\n"
-                    "3. Aguarde 1-2 minutos após configurar para propagação\n\n"
-                    "Veja: CONFIGURAR_IAM_SIGNED_URL.md"
-                )
+            # Construir canonical request
+            verb = "PUT"
+            canonical_uri = f"/{self.bucket_name}/{object_name}"
+            canonical_query_string = f"X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential={urllib.parse.quote(sa_email)}%2F{datetime.datetime.now(timezone.utc).strftime('%Y%m%d')}%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date={datetime.datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}&X-Goog-Expires={expiration_minutes * 60}&X-Goog-SignedHeaders=host"
+            
+            if content_type:
+                canonical_query_string += f"&content-type={urllib.parse.quote(content_type)}"
+            
+            canonical_headers = "host:storage.googleapis.com\n"
+            if content_type:
+                canonical_headers += f"content-type:{content_type}\n"
+            
+            signed_headers = "host"
+            if content_type:
+                signed_headers += ";content-type"
+            
+            canonical_request = f"{verb}\n{canonical_uri}\n{canonical_query_string}\n{canonical_headers}\n{signed_headers}\nUNSIGNED-PAYLOAD"
+            
+            # Assinar via IAM API
+            import hashlib
+            canonical_request_hash = hashlib.sha256(canonical_request.encode()).hexdigest()
+            
+            string_to_sign = f"GOOG4-RSA-SHA256\n{datetime.datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}\n{datetime.datetime.now(timezone.utc).strftime('%Y%m%d')}/auto/storage/goog4_request\n{canonical_request_hash}"
+            
+            signature_b64 = self._sign_blob_via_iam_api(string_to_sign.encode(), sa_email)
+            
+            if not signature_b64:
+                raise RuntimeError("Falha ao obter assinatura via IAM API")
+            
+            # Construir URL final
+            import base64
+            signature = base64.b64decode(signature_b64).hex()
+            
+            signed_url = f"https://storage.googleapis.com{canonical_uri}?{canonical_query_string}&X-Goog-Signature={signature}"
+            
+            return signed_url
 
         except Exception as e:
             st.error(
