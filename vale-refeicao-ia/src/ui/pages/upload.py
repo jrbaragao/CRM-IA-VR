@@ -326,7 +326,7 @@ def process_uploaded_files(files):
 
 def render_gcs_direct_upload_section(bucket_name: str):
     """Seção para upload direto ao GCS via Signed URL (PUT) sem enviar arquivo ao servidor."""
-    st.subheader("☁️ Upload Direto ao Google Cloud Storage (Recomendado para >30MB)")
+    st.subheader("☁️ Upload Direto ao Google Cloud Storage (para arquivos grandes)")
 
     # Gerar um nome de objeto único na sessão
     if 'gcs_pending_object' not in st.session_state:
@@ -335,91 +335,102 @@ def render_gcs_direct_upload_section(bucket_name: str):
 
     object_name = st.session_state['gcs_pending_object']
 
-    # Gera Signed URL com content-type genérico
+    # Tenta gerar Signed URL (requer chave privada ou IAM configurado)
     signed_url = storage_manager.generate_signed_upload_url(
         object_name,
         expiration_minutes=30,
-        content_type="application/octet-stream"
+        content_type=None  # Permite qualquer content-type
     )
 
-    gs_path = f"gs://{bucket_name}/{object_name}"
-    st.info(f"Destino no GCS: {gs_path}")
-
-    # Se Signed URL não estiver disponível, cria sessão resumable
-    session_url = None
     if not signed_url:
-        session_url = storage_manager.create_resumable_upload_session(object_name, "application/octet-stream")
+        st.error("""
+        ❌ **Upload direto não disponível neste ambiente**
+        
+        **Motivo:** Cloud Run sem chave privada da conta de serviço.
+        
+        **Soluções:**
+        1. 💻 **Use a versão local** para arquivos >30MB (recomendado)
+        2. 📂 **Divida o arquivo** em partes menores (<30MB cada)
+        3. 🔧 **Configure Service Account Key** como secret no Cloud Run
+        
+        Para arquivos <30MB, use o upload tradicional acima.
+        """)
+        return
+
+    gs_path = f"gs://{bucket_name}/{object_name}"
+    st.success(f"✅ Upload direto habilitado! Destino: `{gs_path}`")
 
     html = """
-<div style=\"font-family: sans-serif;\">
-  <input id=\"fileInput\" type=\"file\" accept=\".csv,.xlsx,.xls\" />
-  <button id=\"btnUpload\">Enviar ao GCS</button>
-  <div id=\"status\" style=\"margin-top:8px;color:#333\"></div>
+<div style="font-family: sans-serif;">
+  <label for="fileInput" style="display:block;margin-bottom:8px;font-weight:bold;">
+    Selecione o arquivo (será enviado direto ao GCS):
+  </label>
+  <input id="fileInput" type="file" accept=".csv,.xlsx,.xls" style="margin-bottom:8px;" />
+  <button id="btnUpload" style="padding:8px 16px;background:#667eea;color:white;border:none;border-radius:4px;cursor:pointer;">
+    🚀 Enviar ao GCS
+  </button>
+  <div id="status" style="margin-top:12px;padding:8px;border-radius:4px;"></div>
 </div>
 <script>
   const btn = document.getElementById('btnUpload');
   const input = document.getElementById('fileInput');
   const statusEl = document.getElementById('status');
-  const signedUrl = '__SIGNED_URL__';
-  const resumableUrl = '__SESSION_URL__';
+  const uploadUrl = '__UPLOAD_URL__';
+  const gsPath = '__GS_PATH__';
+  
   btn.onclick = async () => {
     try {
       if (!input.files || input.files.length === 0) {
-        statusEl.textContent = 'Selecione um arquivo primeiro';
+        statusEl.style.background = '#fff3cd';
+        statusEl.textContent = '⚠️ Selecione um arquivo primeiro';
         return;
       }
+      
       const file = input.files[0];
-      statusEl.textContent = 'Enviando...';
-      if (signedUrl && signedUrl !== 'NONE') {
-        const resp = await fetch(signedUrl, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/octet-stream' },
-          body: file
-        });
-        if (!resp.ok) {
-          const text = await resp.text();
-          statusEl.textContent = 'Falha no upload (Signed URL): ' + resp.status;
-          const pre = document.createElement('pre');
-          pre.textContent = text;
-          statusEl.appendChild(pre);
-          return;
+      const sizeMB = (file.size / (1024 * 1024)).toFixed(2);
+      
+      statusEl.style.background = '#d1ecf1';
+      statusEl.textContent = `📤 Enviando ${file.name} (${sizeMB} MB)...`;
+      
+      const resp = await fetch(uploadUrl, {
+        method: 'PUT',
+        body: file,
+        headers: {
+          'Content-Type': file.type || 'application/octet-stream'
         }
-      } else if (resumableUrl && resumableUrl !== 'NONE') {
-        // Upload resumable com um único chunk (envia todo arquivo)
-        const resp = await fetch(resumableUrl, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/octet-stream',
-            'Content-Range': 'bytes 0-' + (file.size - 1) + '/' + file.size
-          },
-          body: file
-        });
-        if (!(resp.ok || resp.status === 308)) {
-          const text = await resp.text();
-          statusEl.textContent = 'Falha no upload (Resumable): ' + resp.status;
-          const pre = document.createElement('pre');
-          pre.textContent = text;
-          statusEl.appendChild(pre);
-          return;
-        }
-      } else {
-        statusEl.textContent = 'Não foi possível iniciar upload (sem URL)';
+      });
+      
+      if (!resp.ok) {
+        const text = await resp.text();
+        statusEl.style.background = '#f8d7da';
+        statusEl.innerHTML = `❌ Falha no upload: ${resp.status}<br><pre style="margin-top:8px;font-size:0.85em;">${text}</pre>`;
         return;
       }
-      statusEl.textContent = '✅ Upload concluído: __GS_PATH__';
+      
+      statusEl.style.background = '#d4edda';
+      statusEl.textContent = `✅ Upload concluído! Arquivo: ${gsPath}`;
     } catch (e) {
-      statusEl.textContent = 'Erro: ' + (e && (e.message || e))
+      statusEl.style.background = '#f8d7da';
+      statusEl.textContent = '❌ Erro: ' + (e && (e.message || e));
     }
   };
 </script>
     """
-    html = html.replace('__SIGNED_URL__', signed_url or 'NONE')\
-               .replace('__SESSION_URL__', session_url or 'NONE')\
-               .replace('__GS_PATH__', gs_path)
-    components.html(html, height=200)
+    html = html.replace('__UPLOAD_URL__', signed_url).replace('__GS_PATH__', gs_path)
+    components.html(html, height=220)
 
-    if st.button("🔄 Verificar e processar arquivo do GCS"):
-        process_gcs_uploaded_file(gs_path)
+    st.divider()
+    
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        if st.button("🔄 Verificar e processar arquivo do GCS", type="primary"):
+            process_gcs_uploaded_file(gs_path)
+    
+    with col2:
+        if st.button("🔄 Gerar nova URL", help="Gera um novo caminho de destino"):
+            if 'gcs_pending_object' in st.session_state:
+                del st.session_state['gcs_pending_object']
+            st.rerun()
 
 def process_gcs_uploaded_file(gcs_path: str):
     """Lê arquivo do GCS e integra ao fluxo de arquivos carregados."""

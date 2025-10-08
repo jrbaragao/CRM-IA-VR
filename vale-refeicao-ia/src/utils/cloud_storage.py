@@ -102,7 +102,11 @@ class CloudStorageManager:
     def generate_signed_upload_url(self, object_name: str, expiration_minutes: int = 30, content_type: Optional[str] = None) -> Optional[str]:
         """
         Gera uma Signed URL (V4) para upload direto via HTTP PUT para o objeto informado.
-        OBS: Em alguns ambientes/versões a assinatura via IAM pode não estar disponível.
+        
+        Usa IAM Service Account Credentials API quando não há chave privada disponível.
+        Requer:
+        - API 'IAM Service Account Credentials' habilitada
+        - Papel 'Service Account Token Creator' na service account do Cloud Run
         """
         if not (self.use_gcs and self.bucket):
             st.error("Cloud Storage não está disponível para gerar Signed URL")
@@ -111,43 +115,79 @@ class CloudStorageManager:
         try:
             blob = self.bucket.blob(object_name)
             expiration = datetime.timedelta(minutes=expiration_minutes)
-            ct = content_type or "application/octet-stream"
 
-            # 1) Tentativa normal (assinatura local com chave privada/se disponível)
+            # 1) Tentativa: assinatura com chave privada (local/ADC com JSON key)
             try:
                 url = blob.generate_signed_url(
                     version="v4",
                     expiration=expiration,
                     method="PUT",
-                    content_type=ct,
+                    content_type=content_type,
                 )
                 return url
-            except Exception:
+            except AttributeError:
+                # Credenciais sem chave privada (ComputeEngineCredentials)
                 pass
+            except Exception as e:
+                # Outros erros, continua para fallback IAM
+                st.warning(f"Tentativa de assinatura local falhou: {e}")
 
-            # 2) Fallback: tentar via service_account_email + credentials (nem todas versões suportam)
+            # 2) Fallback: assinatura via IAM (sem chave privada)
+            sa_email = self._get_service_account_email()
+            if not sa_email:
+                raise RuntimeError(
+                    "Não foi possível obter o email da service account. "
+                    "Verifique se está rodando no Cloud Run."
+                )
+
+            # Obtém as credenciais atuais
+            credentials = getattr(self.client, "_credentials", None)
+            if credentials is None:
+                raise RuntimeError("Credenciais não disponíveis no cliente GCS")
+
+            # Cria um signing request que usa IAM Credentials API
+            from google.auth import iam
+            from google.auth.transport import requests as auth_requests
+            
+            signing_request = auth_requests.Request()
+            
+            # Tenta usar google.auth.iam.Signer para assinar via IAM
             try:
-                sa_email = self._get_service_account_email()
-                credentials = getattr(self.client, "_credentials", None)
-                if sa_email and credentials is not None:
-                    request = GoogleAuthRequest()
-                    url = blob.generate_signed_url(
-                        version="v4",
-                        expiration=expiration,
-                        method="PUT",
-                        content_type=ct,
-                        service_account_email=sa_email,
-                        credentials=credentials,
-                    )
-                    return url
-            except Exception:
-                pass
+                from google.auth.iam import Signer
+                
+                signer = Signer(
+                    request=signing_request,
+                    credentials=credentials,
+                    service_account_email=sa_email
+                )
+                
+                # Gera URL assinada usando o signer IAM
+                url = blob.generate_signed_url(
+                    version="v4",
+                    expiration=expiration,
+                    method="PUT",
+                    content_type=content_type,
+                    service_account_email=sa_email,
+                    access_token=None,  # Força uso do signer
+                    credentials=signer,
+                )
+                return url
+                
+            except Exception as iam_error:
+                st.error(f"Erro ao usar IAM Signer: {iam_error}")
+                raise RuntimeError(
+                    f"Falha na assinatura via IAM: {iam_error}\n\n"
+                    "Verifique:\n"
+                    "1. API 'IAM Service Account Credentials' está habilitada\n"
+                    "2. Service Account tem papel 'Service Account Token Creator' sobre ela mesma\n"
+                    "3. Aguarde 1-2 minutos após configurar para propagação\n\n"
+                    "Veja: CONFIGURAR_IAM_SIGNED_URL.md"
+                )
 
-            raise RuntimeError("Assinatura de URL não suportada neste ambiente/biblioteca.")
         except Exception as e:
             st.error(
-                "Erro ao gerar Signed URL: {}\n"
-                "Alternativa: usaremos sessão de upload recomeçável (resumable) automaticamente.".format(e)
+                f"❌ Erro ao gerar Signed URL: {e}\n\n"
+                "📚 Consulte o guia: CONFIGURAR_IAM_SIGNED_URL.md"
             )
             return None
 
