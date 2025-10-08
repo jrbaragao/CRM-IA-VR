@@ -16,6 +16,8 @@ IS_CLOUD_RUN = os.getenv('K_SERVICE') is not None
 if IS_CLOUD_RUN:
     try:
         from google.cloud import storage
+        from google.auth.transport.requests import Request as GoogleAuthRequest
+        from google.auth.iam import Signer as IamSigner
         GCS_AVAILABLE = True
     except ImportError:
         GCS_AVAILABLE = False
@@ -118,29 +120,44 @@ class CloudStorageManager:
             blob = self.bucket.blob(object_name)
             expiration = datetime.timedelta(minutes=expiration_minutes)
 
-            # Tenta usar a conta de serviço do Cloud Run via IAM para assinar sem chave privada
-            sa_email = self._get_service_account_email()
-            credentials = getattr(self.client, "_credentials", None)
+            # 1) Tentativa normal (credenciais com chave privada ou ADC local)
+            try:
+                url = blob.generate_signed_url(
+                    version="v4",
+                    expiration=expiration,
+                    method="PUT",
+                    content_type=content_type,
+                )
+                return url
+            except Exception:
+                pass
 
-            params = {
-                "version": "v4",
-                "expiration": expiration,
-                "method": "PUT",
-            }
-            if content_type:
-                params["content_type"] = content_type
-            if sa_email:
-                params["service_account_email"] = sa_email
-            if credentials is not None:
-                params["credentials"] = credentials
+            # 2) Fallback: usar IAM Credentials API (sem chave privada) via Signer
+            try:
+                sa_email = self._get_service_account_email()
+                credentials = getattr(self.client, "_credentials", None)
+                if not sa_email or credentials is None:
+                    raise RuntimeError("Credenciais/Service Account não disponíveis para assinatura via IAM")
 
-            url = blob.generate_signed_url(**params)
-            return url
+                request = GoogleAuthRequest()
+                iam_signer = IamSigner(request, credentials, sa_email)
+
+                url = blob.generate_signed_url(
+                    version="v4",
+                    expiration=expiration,
+                    method="PUT",
+                    content_type=content_type,
+                    service_account_email=sa_email,
+                    signer=iam_signer,
+                )
+                return url
+            except Exception as e2:
+                raise e2
         except Exception as e:
             st.error(
                 "Erro ao gerar Signed URL: {}\n"
-                "Dicas: habilite a API 'IAM Service Account Credentials' e conceda o papel "
-                "'Service Account Token Creator' à conta de serviço do Cloud Run em si mesma.".format(e)
+                "Verifique: API 'IAM Service Account Credentials' habilitada e papel 'Service Account Token Creator'\n"
+                "na conta de serviço do Cloud Run (concedido para ela própria).".format(e)
             )
             return None
 
