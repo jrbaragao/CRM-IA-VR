@@ -98,6 +98,17 @@ class CloudStorageManager:
             except Exception as e:
                 st.error(f"Erro ao fazer upload para GCS: {e}")
                 return None
+        else:
+            # Salvar localmente
+            local_path = Path(folder) / filename
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            try:
+                local_path.write_bytes(file_content)
+                return str(local_path)
+            except Exception as e:
+                st.error(f"Erro ao salvar arquivo localmente: {e}")
+                return None
 
     def generate_signed_upload_url(self, object_name: str, expiration_minutes: int = 30, content_type: Optional[str] = None) -> Optional[str]:
         """
@@ -236,17 +247,6 @@ class CloudStorageManager:
         except Exception as e:
             st.error(f"Erro ao configurar CORS do bucket: {e}")
             return False
-        else:
-            # Salvar localmente
-            local_path = Path(folder) / filename
-            local_path.parent.mkdir(parents=True, exist_ok=True)
-            
-            try:
-                local_path.write_bytes(file_content)
-                return str(local_path)
-            except Exception as e:
-                st.error(f"Erro ao salvar arquivo localmente: {e}")
-                return None
     
     def download_file(self, file_path: str) -> Optional[bytes]:
         """
