@@ -139,7 +139,7 @@ graph TD
 
 ### 📝 **Exemplo Prático Completo**
 
-1. **Página Upload** → Carregue `vendas.csv`
+1. **Página Upload** → Carregue `vendas.csv` (use Upload Direto ao GCS para arquivos grandes)
 2. **Página Preparação de Dados** → Clique "Processar"
 3. **Página Banco de Dados** → Veja tabela criada
 4. **Página Agentes de IA** → Configure análise desejada
@@ -186,7 +186,7 @@ streamlit run app.py --server.runOnSave true
 A aplicação está otimizada para rodar no **Google Cloud Run** com suporte completo a:
 
 - **📦 Build Automático**: Docker otimizado para Linux/Cloud
-- **☁️ Cloud Storage**: Upload de arquivos até 500MB
+- **☁️ Cloud Storage**: Upload direto (Signed URL) para arquivos grandes
 - **🔐 Autenticação Automática**: Service Account gerenciada
 - **⚡ Escalabilidade**: Auto-scaling baseado em demanda
 - **🌍 Acesso Global**: URL pública HTTPS
@@ -238,8 +238,8 @@ gcloud run services update crmia-agente-autonomo \
 ```python
 Storage Inteligente:
 ├── ☁️ Produção (Cloud Run)
-│   ├── Upload direto para Google Cloud Storage
-│   ├── Limite: 500MB por arquivo
+│   ├── Upload direto (Signed URL) para o Google Cloud Storage
+│   ├── Sem limite fixo do Cloud Run (GCS suporta até 5TB por objeto)
 │   ├── Persistência: Dados mantidos entre deploys
 │   └── Performance: Alta disponibilidade
 └── 💾 Desenvolvimento (Local)
@@ -367,15 +367,13 @@ graph LR
 ### 1. 📤 **Upload de Dados** (Passo 1)
 ```
 📤 Upload de Dados
-├── 📁 Selecione múltiplos arquivos (CSV, Excel)
+├── 📁 Selecione arquivos (CSV, Excel)
+├── ☁️ Para arquivos grandes: use "Upload Direto ao GCS" (Signed URL)
 ├── 🔑 Defina coluna de indexação personalizada
 ├── ✅ Arquivos carregados automaticamente
 ├── 📊 Preview dos dados
-├── ⚡ Suporte a arquivos:
-│   ├── ☁️ Cloud Storage (Cloud Run): até 500MB
-│   └── 💾 Local (desenvolvimento): até 200MB
 ├── 🔄 Storage inteligente:
-│   ├── ☁️ Produção → Google Cloud Storage
+│   ├── ☁️ Produção → Google Cloud Storage (upload direto)
 │   └── 💾 Local → Disco local
 └── ➡️ IMPORTANTE: Vá para "Preparação de Dados" após upload
 ```

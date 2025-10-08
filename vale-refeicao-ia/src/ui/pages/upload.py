@@ -325,93 +325,74 @@ def process_uploaded_files(files):
         st.error(f"❌ Erro ao processar arquivos: {str(e)}")
 
 def render_gcs_direct_upload_section(bucket_name: str):
-    """Seção para upload direto ao GCS via Signed URL (PUT)."""
+    """Seção para upload direto ao GCS via Signed URL (PUT) sem enviar arquivo ao servidor."""
     st.subheader("☁️ Upload Direto ao Google Cloud Storage (Recomendado para >30MB)")
 
-    # Selecionar arquivo (apenas para pegar metadados e acionar JS)
-    uploaded_file = st.file_uploader(
-        "Selecione um arquivo grande para enviar direto ao GCS",
-        type=['csv', 'xlsx', 'xls'],
-        accept_multiple_files=False,
-        key="gcs_direct_upload_picker",
-        help="O arquivo será enviado diretamente ao Google Cloud Storage, sem passar pelo Cloud Run."
+    # Gerar um nome de objeto único na sessão
+    if 'gcs_pending_object' not in st.session_state:
+        unique_id = f"{int(datetime.now().timestamp())}-{os.urandom(4).hex()}"
+        st.session_state['gcs_pending_object'] = f"uploads/upload-{unique_id}"
+
+    object_name = st.session_state['gcs_pending_object']
+
+    # Gera Signed URL com content-type genérico
+    signed_url = storage_manager.generate_signed_upload_url(
+        object_name,
+        expiration_minutes=30,
+        content_type="application/octet-stream"
     )
-
-    if uploaded_file is None:
-        return
-
-    filename = uploaded_file.name
-    content_type = uploaded_file.type or "application/octet-stream"
-    object_name = f"uploads/{filename}"
-
-    # Gerar Signed URL (será usada pelo JS para PUT)
-    signed_url = storage_manager.generate_signed_upload_url(object_name, expiration_minutes=30, content_type=content_type)
 
     if not signed_url:
         st.error("Não foi possível gerar URL assinada para upload.")
         return
 
-    st.info(f"Arquivo: {filename} | Tipo: {content_type}")
+    gs_path = f"gs://{bucket_name}/{object_name}"
+    st.info(f"Destino no GCS: {gs_path}")
 
-    # Enviar o conteúdo em memória via JS fetch PUT
-    # Estratégia: lemos o arquivo no frontend via input invisível controlado pelo Streamlit
-    # e fazemos PUT com o mesmo content-type.
-    upload_button = st.button("🚀 Enviar direto ao GCS")
-
-    if upload_button:
-        # Obter bytes do arquivo e expor como base64 para o JS reconstruir um Blob
-        file_bytes = uploaded_file.getvalue()
-        b64_data = file_bytes.hex()
-
-        components.html(
-            f"""
+    components.html(
+        f"""
+<div style=\"font-family: sans-serif;\">
+  <input id=\"fileInput\" type=\"file\" accept=\".csv,.xlsx,.xls\" />
+  <button id=\"btnUpload\">Enviar ao GCS</button>
+  <div id=\"status\" style=\"margin-top:8px;color:#333\"></div>
+</div>
 <script>
-(async () => {{
-  try {{
-    const hex = "{b64_data}";
-    function hexToBytes(hex) {{
-      const bytes = new Uint8Array(hex.length / 2);
-      for (let i = 0; i < bytes.length; i++) {{
-        bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
-      }}
-      return bytes;
-    }}
-    const bytes = hexToBytes(hex);
-    const blob = new Blob([bytes], {{ type: "{content_type}" }});
-
-    const resp = await fetch("{signed_url}", {{
-      method: 'PUT',
-      headers: {{
-        'Content-Type': '{content_type}'
-      }},
-      body: blob
-    }});
-
-    if (!resp.ok) {{
-      const text = await resp.text();
-      document.body.innerHTML = `<pre>Falha no upload: ${{resp.status}}\n${{text}}</pre>`;
-      return;
-    }}
-
-    document.body.innerHTML = `<div style="font-family: sans-serif;">✅ Upload concluído no GCS: gs://{bucket_name}/{object_name}</div>`;
-    window.parent.postMessage({{ type: 'gcs-upload-done', path: 'gs://{bucket_name}/{object_name}' }}, '*');
-  }} catch (e) {{
-    document.body.innerHTML = `<pre>Erro: ${{e?.message || e}}</pre>`;
-  }}
-}})();
+  const btn = document.getElementById('btnUpload');
+  const input = document.getElementById('fileInput');
+  const statusEl = document.getElementById('status');
+  btn.onclick = async () => {
+    try {
+      if (!input.files || input.files.length === 0) {
+        statusEl.textContent = 'Selecione um arquivo primeiro';
+        return;
+      }
+      const file = input.files[0];
+      statusEl.textContent = 'Enviando...';
+      const resp = await fetch('{signed_url}', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: file
+      });
+      if (!resp.ok) {
+        const text = await resp.text();
+        statusEl.textContent = `Falha no upload: ${resp.status}`;
+        const pre = document.createElement('pre');
+        pre.textContent = text;
+        statusEl.appendChild(pre);
+        return;
+      }
+      statusEl.textContent = '✅ Upload concluído: {gs_path}';
+    } catch (e) {
+      statusEl.textContent = 'Erro: ' + (e?.message || e);
+    }
+  };
 </script>
-            """,
-            height=120
-        )
+        """,
+        height=160
+    )
 
-        # Registrar no session state caminho no GCS (será confirmado pelo postMessage)
-        st.session_state['last_gcs_object'] = f"gs://{bucket_name}/{object_name}"
-
-    # Botão para processar arquivo que já está no GCS
-    if st.session_state.get('last_gcs_object'):
-        st.success(f"Arquivo no GCS: {st.session_state['last_gcs_object']}")
-        if st.button("🔄 Ler e processar arquivo do GCS"):
-            process_gcs_uploaded_file(st.session_state['last_gcs_object'])
+    if st.button("🔄 Verificar e processar arquivo do GCS"):
+        process_gcs_uploaded_file(gs_path)
 
 def process_gcs_uploaded_file(gcs_path: str):
     """Lê arquivo do GCS e integra ao fluxo de arquivos carregados."""
