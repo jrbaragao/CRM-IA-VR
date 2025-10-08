@@ -386,9 +386,9 @@ def render_gcs_direct_upload_section(bucket_name: str):
     }
   };
 </script>
-        """
-        html = html.replace('__SIGNED_URL__', signed_url).replace('__GS_PATH__', gs_path)
-        components.html(html, height=160)
+    """
+    html = html.replace('__SIGNED_URL__', signed_url).replace('__GS_PATH__', gs_path)
+    components.html(html, height=160)
 
     if st.button("🔄 Verificar e processar arquivo do GCS"):
         process_gcs_uploaded_file(gs_path)
