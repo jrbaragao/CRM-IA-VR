@@ -8,6 +8,7 @@ import datetime
 from pathlib import Path
 from typing import Optional
 import streamlit as st
+import requests
 
 # Verificar se estamos rodando no Cloud Run
 IS_CLOUD_RUN = os.getenv('K_SERVICE') is not None
@@ -55,6 +56,22 @@ class CloudStorageManager:
             except Exception as e:
                 st.error(f"Erro ao criar bucket: {e}")
                 return None
+
+    def _get_service_account_email(self) -> Optional[str]:
+        """Obtém o e-mail da conta de serviço padrão via metadata server (Cloud Run)."""
+        if not IS_CLOUD_RUN:
+            return None
+        try:
+            resp = requests.get(
+                "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/email",
+                headers={"Metadata-Flavor": "Google"},
+                timeout=2,
+            )
+            if resp.status_code == 200:
+                return resp.text.strip()
+        except Exception:
+            pass
+        return None
     
     def upload_file(self, file_content: bytes, filename: str, folder: str = "uploads") -> Optional[str]:
         """
@@ -101,23 +118,30 @@ class CloudStorageManager:
             blob = self.bucket.blob(object_name)
             expiration = datetime.timedelta(minutes=expiration_minutes)
 
-            if content_type:
-                url = blob.generate_signed_url(
-                    version="v4",
-                    expiration=expiration,
-                    method="PUT",
-                    content_type=content_type,
-                )
-            else:
-                url = blob.generate_signed_url(
-                    version="v4",
-                    expiration=expiration,
-                    method="PUT",
-                )
+            # Tenta usar a conta de serviço do Cloud Run via IAM para assinar sem chave privada
+            sa_email = self._get_service_account_email()
+            credentials = getattr(self.client, "_credentials", None)
 
+            params = {
+                "version": "v4",
+                "expiration": expiration,
+                "method": "PUT",
+            }
+            if content_type:
+                params["content_type"] = content_type
+            if sa_email:
+                params["service_account_email"] = sa_email
+            if credentials is not None:
+                params["credentials"] = credentials
+
+            url = blob.generate_signed_url(**params)
             return url
         except Exception as e:
-            st.error(f"Erro ao gerar Signed URL: {e}")
+            st.error(
+                "Erro ao gerar Signed URL: {}\n"
+                "Dicas: habilite a API 'IAM Service Account Credentials' e conceda o papel "
+                "'Service Account Token Creator' à conta de serviço do Cloud Run em si mesma.".format(e)
+            )
             return None
 
     def configure_bucket_cors(self) -> bool:
