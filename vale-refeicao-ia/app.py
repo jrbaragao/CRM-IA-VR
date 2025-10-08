@@ -145,10 +145,14 @@ def main():
     
     # Footer
     st.markdown("---")
-    st.markdown("""
+    import os as _os
+    k_service = _os.getenv("K_SERVICE", "Local")
+    k_revision = _os.getenv("K_REVISION", "Dev")
+    st.markdown(f"""
     <div style='text-align: center; color: #666;'>
         <p>💳 Sistema de Vale Refeição IA | Desenvolvido com Streamlit e LlamaIndex</p>
         <p style='font-size: 0.8rem;'>Versão 1.0.0 | © 2024</p>
+        <p style='font-size: 0.75rem; color:#999;'>K_SERVICE: <code>{k_service}</code> | K_REVISION: <code>{k_revision}</code></p>
     </div>
     """, unsafe_allow_html=True)
 
