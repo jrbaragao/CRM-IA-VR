@@ -349,8 +349,7 @@ def render_gcs_direct_upload_section(bucket_name: str):
     gs_path = f"gs://{bucket_name}/{object_name}"
     st.info(f"Destino no GCS: {gs_path}")
 
-    components.html(
-        f"""
+    html = """
 <div style=\"font-family: sans-serif;\">
   <input id=\"fileInput\" type=\"file\" accept=\".csv,.xlsx,.xls\" />
   <button id=\"btnUpload\">Enviar ao GCS</button>
@@ -368,28 +367,28 @@ def render_gcs_direct_upload_section(bucket_name: str):
       }
       const file = input.files[0];
       statusEl.textContent = 'Enviando...';
-      const resp = await fetch('{signed_url}', {
+      const resp = await fetch('__SIGNED_URL__', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/octet-stream' },
         body: file
       });
       if (!resp.ok) {
         const text = await resp.text();
-        statusEl.textContent = `Falha no upload: ${resp.status}`;
+        statusEl.textContent = 'Falha no upload: ' + resp.status;
         const pre = document.createElement('pre');
         pre.textContent = text;
         statusEl.appendChild(pre);
         return;
       }
-      statusEl.textContent = '✅ Upload concluído: {gs_path}';
+      statusEl.textContent = '✅ Upload concluído: ' + '__GS_PATH__';
     } catch (e) {
-      statusEl.textContent = 'Erro: ' + (e?.message || e);
+      statusEl.textContent = 'Erro: ' + (e && (e.message || e))
     }
   };
 </script>
-        """,
-        height=160
-    )
+        """
+        html = html.replace('__SIGNED_URL__', signed_url).replace('__GS_PATH__', gs_path)
+        components.html(html, height=160)
 
     if st.button("🔄 Verificar e processar arquivo do GCS"):
         process_gcs_uploaded_file(gs_path)
