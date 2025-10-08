@@ -146,13 +146,41 @@ def main():
     # Footer
     st.markdown("---")
     import os as _os
+    import subprocess
+    
     k_service = _os.getenv("K_SERVICE", "Local")
     k_revision = _os.getenv("K_REVISION", "Dev")
+    
+    # Tentar obter hash do Git commit
+    git_hash = "unknown"
+    try:
+        git_hash = subprocess.check_output(
+            ['git', 'rev-parse', '--short', 'HEAD'],
+            cwd=Path(__file__).parent,
+            stderr=subprocess.DEVNULL,
+            timeout=2
+        ).decode('utf-8').strip()
+    except:
+        pass
+    
+    # Timestamp do arquivo app.py (última modificação)
+    try:
+        app_mtime = _os.path.getmtime(__file__)
+        from datetime import datetime
+        app_date = datetime.fromtimestamp(app_mtime).strftime('%Y-%m-%d %H:%M')
+    except:
+        app_date = "unknown"
+    
     st.markdown(f"""
     <div style='text-align: center; color: #666;'>
         <p>💳 Sistema de Vale Refeição IA | Desenvolvido com Streamlit e LlamaIndex</p>
         <p style='font-size: 0.8rem;'>Versão 1.0.0 | © 2024</p>
-        <p style='font-size: 0.75rem; color:#999;'>K_SERVICE: <code>{k_service}</code> | K_REVISION: <code>{k_revision}</code></p>
+        <p style='font-size: 0.75rem; color:#999;'>
+            K_SERVICE: <code>{k_service}</code> | 
+            K_REVISION: <code>{k_revision}</code> | 
+            Git: <code>{git_hash}</code> | 
+            Build: <code>{app_date}</code>
+        </p>
     </div>
     """, unsafe_allow_html=True)
 
