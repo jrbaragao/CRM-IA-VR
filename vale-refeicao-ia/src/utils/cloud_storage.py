@@ -102,14 +102,7 @@ class CloudStorageManager:
     def generate_signed_upload_url(self, object_name: str, expiration_minutes: int = 30, content_type: Optional[str] = None) -> Optional[str]:
         """
         Gera uma Signed URL (V4) para upload direto via HTTP PUT para o objeto informado.
-
-        Args:
-            object_name: Caminho do objeto dentro do bucket (ex: "uploads/arquivo.csv")
-            expiration_minutes: Tempo de expiração da URL em minutos
-            content_type: Content-Type esperado (opcional). Se informado, o cliente deve enviar o mesmo header
-
-        Returns:
-            URL assinada (string) ou None em caso de erro
+        OBS: Em alguns ambientes/versões a assinatura via IAM pode não estar disponível.
         """
         if not (self.use_gcs and self.bucket):
             st.error("Cloud Storage não está disponível para gerar Signed URL")
@@ -132,38 +125,52 @@ class CloudStorageManager:
             except Exception:
                 pass
 
-            # 2) Fallback: usar IAM Credentials API via service_account_email + credentials + request
-            sa_email = self._get_service_account_email()
-            credentials = getattr(self.client, "_credentials", None)
-            if not sa_email or credentials is None:
-                raise RuntimeError("Credenciais/Service Account não disponíveis para assinatura via IAM")
+            # 2) Fallback: tentar via service_account_email + credentials (nem todas versões suportam)
+            try:
+                sa_email = self._get_service_account_email()
+                credentials = getattr(self.client, "_credentials", None)
+                if sa_email and credentials is not None:
+                    request = GoogleAuthRequest()
+                    url = blob.generate_signed_url(
+                        version="v4",
+                        expiration=expiration,
+                        method="PUT",
+                        content_type=ct,
+                        service_account_email=sa_email,
+                        credentials=credentials,
+                    )
+                    return url
+            except Exception:
+                pass
 
-            request = GoogleAuthRequest()
-            url = blob.generate_signed_url(
-                version="v4",
-                expiration=expiration,
-                method="PUT",
-                content_type=ct,
-                service_account_email=sa_email,
-                credentials=credentials,
-                request=request,
-            )
-            return url
+            raise RuntimeError("Assinatura de URL não suportada neste ambiente/biblioteca.")
         except Exception as e:
             st.error(
                 "Erro ao gerar Signed URL: {}\n"
-                "Verifique: API 'IAM Service Account Credentials' habilitada e papel 'Service Account Token Creator'\n"
-                "na conta de serviço do Cloud Run (concedido para ela própria).".format(e)
+                "Alternativa: usaremos sessão de upload recomeçável (resumable) automaticamente.".format(e)
             )
+            return None
+
+    def create_resumable_upload_session(self, object_name: str, content_type: str = "application/octet-stream") -> Optional[str]:
+        """
+        Cria uma sessão de upload recomeçável (resumable) e retorna a URL da sessão.
+        Essa abordagem não requer Signed URL e permite upload direto do navegador.
+        """
+        if not (self.use_gcs and self.bucket):
+            st.error("Cloud Storage não está disponível para criar sessão de upload")
+            return None
+        try:
+            blob = self.bucket.blob(object_name)
+            session_url = blob.create_resumable_upload_session(content_type=content_type)
+            return session_url
+        except Exception as e:
+            st.error(f"Erro ao criar sessão de upload: {e}")
             return None
 
     def configure_bucket_cors(self) -> bool:
         """
         Configura CORS do bucket para permitir uploads diretos do navegador.
         Permite métodos: PUT, GET, POST, HEAD, OPTIONS de qualquer origem.
-
-        Returns:
-            True em caso de sucesso, False caso contrário
         """
         if not (self.use_gcs and self.bucket):
             return False
@@ -171,7 +178,11 @@ class CloudStorageManager:
         try:
             desired_cors = [{
                 "origin": ["*"],
-                "responseHeader": ["*"],
+                "responseHeader": [
+                    "Content-Type",
+                    "Content-Range",
+                    "x-goog-resumable",
+                    "x-goog-meta-*"] ,
                 "method": ["PUT", "GET", "POST", "HEAD", "OPTIONS"],
                 "maxAgeSeconds": 3600
             }]

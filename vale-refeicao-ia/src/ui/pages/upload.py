@@ -342,12 +342,13 @@ def render_gcs_direct_upload_section(bucket_name: str):
         content_type="application/octet-stream"
     )
 
-    if not signed_url:
-        st.error("Não foi possível gerar URL assinada para upload.")
-        return
-
     gs_path = f"gs://{bucket_name}/{object_name}"
     st.info(f"Destino no GCS: {gs_path}")
+
+    # Se Signed URL não estiver disponível, cria sessão resumable
+    session_url = None
+    if not signed_url:
+        session_url = storage_manager.create_resumable_upload_session(object_name, "application/octet-stream")
 
     html = """
 <div style=\"font-family: sans-serif;\">
@@ -359,6 +360,8 @@ def render_gcs_direct_upload_section(bucket_name: str):
   const btn = document.getElementById('btnUpload');
   const input = document.getElementById('fileInput');
   const statusEl = document.getElementById('status');
+  const signedUrl = '__SIGNED_URL__';
+  const resumableUrl = '__SESSION_URL__';
   btn.onclick = async () => {
     try {
       if (!input.files || input.files.length === 0) {
@@ -367,28 +370,53 @@ def render_gcs_direct_upload_section(bucket_name: str):
       }
       const file = input.files[0];
       statusEl.textContent = 'Enviando...';
-      const resp = await fetch('__SIGNED_URL__', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/octet-stream' },
-        body: file
-      });
-      if (!resp.ok) {
-        const text = await resp.text();
-        statusEl.textContent = 'Falha no upload: ' + resp.status;
-        const pre = document.createElement('pre');
-        pre.textContent = text;
-        statusEl.appendChild(pre);
+      if (signedUrl && signedUrl !== 'NONE') {
+        const resp = await fetch(signedUrl, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/octet-stream' },
+          body: file
+        });
+        if (!resp.ok) {
+          const text = await resp.text();
+          statusEl.textContent = 'Falha no upload (Signed URL): ' + resp.status;
+          const pre = document.createElement('pre');
+          pre.textContent = text;
+          statusEl.appendChild(pre);
+          return;
+        }
+      } else if (resumableUrl && resumableUrl !== 'NONE') {
+        // Upload resumable com um único chunk (envia todo arquivo)
+        const resp = await fetch(resumableUrl, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/octet-stream',
+            'Content-Range': 'bytes 0-' + (file.size - 1) + '/' + file.size
+          },
+          body: file
+        });
+        if (!(resp.ok || resp.status === 308)) {
+          const text = await resp.text();
+          statusEl.textContent = 'Falha no upload (Resumable): ' + resp.status;
+          const pre = document.createElement('pre');
+          pre.textContent = text;
+          statusEl.appendChild(pre);
+          return;
+        }
+      } else {
+        statusEl.textContent = 'Não foi possível iniciar upload (sem URL)';
         return;
       }
-      statusEl.textContent = '✅ Upload concluído: ' + '__GS_PATH__';
+      statusEl.textContent = '✅ Upload concluído: __GS_PATH__';
     } catch (e) {
       statusEl.textContent = 'Erro: ' + (e && (e.message || e))
     }
   };
 </script>
     """
-    html = html.replace('__SIGNED_URL__', signed_url).replace('__GS_PATH__', gs_path)
-    components.html(html, height=160)
+    html = html.replace('__SIGNED_URL__', signed_url or 'NONE')\
+               .replace('__SESSION_URL__', session_url or 'NONE')\
+               .replace('__GS_PATH__', gs_path)
+    components.html(html, height=200)
 
     if st.button("🔄 Verificar e processar arquivo do GCS"):
         process_gcs_uploaded_file(gs_path)
