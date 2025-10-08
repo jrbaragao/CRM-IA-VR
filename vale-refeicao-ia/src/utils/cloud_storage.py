@@ -4,6 +4,7 @@ Para arquivos grandes e persistência de dados na nuvem
 """
 
 import os
+import datetime
 from pathlib import Path
 from typing import Optional
 import streamlit as st
@@ -79,6 +80,74 @@ class CloudStorageManager:
             except Exception as e:
                 st.error(f"Erro ao fazer upload para GCS: {e}")
                 return None
+
+    def generate_signed_upload_url(self, object_name: str, expiration_minutes: int = 30, content_type: Optional[str] = None) -> Optional[str]:
+        """
+        Gera uma Signed URL (V4) para upload direto via HTTP PUT para o objeto informado.
+
+        Args:
+            object_name: Caminho do objeto dentro do bucket (ex: "uploads/arquivo.csv")
+            expiration_minutes: Tempo de expiração da URL em minutos
+            content_type: Content-Type esperado (opcional). Se informado, o cliente deve enviar o mesmo header
+
+        Returns:
+            URL assinada (string) ou None em caso de erro
+        """
+        if not (self.use_gcs and self.bucket):
+            st.error("Cloud Storage não está disponível para gerar Signed URL")
+            return None
+
+        try:
+            blob = self.bucket.blob(object_name)
+            expiration = datetime.timedelta(minutes=expiration_minutes)
+
+            if content_type:
+                url = blob.generate_signed_url(
+                    version="v4",
+                    expiration=expiration,
+                    method="PUT",
+                    content_type=content_type,
+                )
+            else:
+                url = blob.generate_signed_url(
+                    version="v4",
+                    expiration=expiration,
+                    method="PUT",
+                )
+
+            return url
+        except Exception as e:
+            st.error(f"Erro ao gerar Signed URL: {e}")
+            return None
+
+    def configure_bucket_cors(self) -> bool:
+        """
+        Configura CORS do bucket para permitir uploads diretos do navegador.
+        Permite métodos: PUT, GET, POST, HEAD, OPTIONS de qualquer origem.
+
+        Returns:
+            True em caso de sucesso, False caso contrário
+        """
+        if not (self.use_gcs and self.bucket):
+            return False
+
+        try:
+            desired_cors = [{
+                "origin": ["*"],
+                "responseHeader": ["*"],
+                "method": ["PUT", "GET", "POST", "HEAD", "OPTIONS"],
+                "maxAgeSeconds": 3600
+            }]
+
+            # Evitar updates desnecessários
+            if self.bucket.cors != desired_cors:
+                self.bucket.cors = desired_cors
+                self.bucket.patch()
+
+            return True
+        except Exception as e:
+            st.error(f"Erro ao configurar CORS do bucket: {e}")
+            return False
         else:
             # Salvar localmente
             local_path = Path(folder) / filename

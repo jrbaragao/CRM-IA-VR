@@ -7,6 +7,9 @@ import pandas as pd
 from pathlib import Path
 from datetime import datetime
 import os
+import io
+import json
+import streamlit.components.v1 as components
 
 from ..components import (
     render_upload_widget,
@@ -30,33 +33,10 @@ def render():
             st.warning(f"""
             ☁️ **Cloud Storage Configurado** - Bucket: `{storage_info['bucket_name']}`
             
-            ⚠️ **LIMITE REAL: 30MB por arquivo** (limitação do Cloud Run confirmada)
+            ✅ **Upload Direto ao GCS habilitado**
             """)
         
-        with col2:
-            if st.button("📁 Arquivos Grandes?", help="Soluções para arquivos > 30MB"):
-                st.info("""
-                ### 🚀 Soluções para Arquivos Grandes:
-                
-                **1. 💻 Versão Local (Recomendado)**
-                ```bash
-                git clone https://github.com/jrbaragao/CRM-IA-VR.git
-                cd CRM-IA-VR/vale-refeicao-ia
-                echo "OPENAI_API_KEY=sk-sua-chave" > .env
-                pip install -r requirements.txt
-                streamlit run app.py
-                ```
-                ✅ Suporte até 200MB
-                
-                **2. 📂 Dividir Arquivo**
-                - Use Excel/Python para dividir em partes < 30MB
-                - Processe cada parte separadamente
-                
-                **3. 📧 Suporte Empresarial**
-                - Upload direto para Cloud Storage (customização)
-                
-                📚 **Documentação**: `UPLOAD_ARQUIVOS_GRANDES.md`
-                """)
+        # col2 intencionalmente sem conteúdo: botão "Arquivos Grandes?" removido
         
         # Debug - vamos descobrir de onde vem o limite
         if st.button("🔍 Debug Upload Limits", help="Investigar de onde vem o limite real"):
@@ -64,6 +44,15 @@ def render():
             
             debug_upload_limits()
             create_test_file()
+
+        # Garantir CORS do bucket para upload direto via navegador (executa uma vez)
+        if not st.session_state.get('gcs_cors_configured'):
+            if storage_manager.configure_bucket_cors():
+                st.session_state['gcs_cors_configured'] = True
+                st.info("CORS do bucket verificado/atualizado para upload direto.")
+
+        st.divider()
+        render_gcs_direct_upload_section(storage_info['bucket_name'])
         
     else:
         st.info("💾 **Modo Local** - Limite de upload: **200MB** por arquivo")
@@ -334,6 +323,131 @@ def process_uploaded_files(files):
         
     except Exception as e:
         st.error(f"❌ Erro ao processar arquivos: {str(e)}")
+
+def render_gcs_direct_upload_section(bucket_name: str):
+    """Seção para upload direto ao GCS via Signed URL (PUT)."""
+    st.subheader("☁️ Upload Direto ao Google Cloud Storage (Recomendado para >30MB)")
+
+    # Selecionar arquivo (apenas para pegar metadados e acionar JS)
+    uploaded_file = st.file_uploader(
+        "Selecione um arquivo grande para enviar direto ao GCS",
+        type=['csv', 'xlsx', 'xls'],
+        accept_multiple_files=False,
+        key="gcs_direct_upload_picker",
+        help="O arquivo será enviado diretamente ao Google Cloud Storage, sem passar pelo Cloud Run."
+    )
+
+    if uploaded_file is None:
+        return
+
+    filename = uploaded_file.name
+    content_type = uploaded_file.type or "application/octet-stream"
+    object_name = f"uploads/{filename}"
+
+    # Gerar Signed URL (será usada pelo JS para PUT)
+    signed_url = storage_manager.generate_signed_upload_url(object_name, expiration_minutes=30, content_type=content_type)
+
+    if not signed_url:
+        st.error("Não foi possível gerar URL assinada para upload.")
+        return
+
+    st.info(f"Arquivo: {filename} | Tipo: {content_type}")
+
+    # Enviar o conteúdo em memória via JS fetch PUT
+    # Estratégia: lemos o arquivo no frontend via input invisível controlado pelo Streamlit
+    # e fazemos PUT com o mesmo content-type.
+    upload_button = st.button("🚀 Enviar direto ao GCS")
+
+    if upload_button:
+        # Obter bytes do arquivo e expor como base64 para o JS reconstruir um Blob
+        file_bytes = uploaded_file.getvalue()
+        b64_data = file_bytes.hex()
+
+        components.html(
+            f"""
+<script>
+(async () => {{
+  try {{
+    const hex = "{b64_data}";
+    function hexToBytes(hex) {{
+      const bytes = new Uint8Array(hex.length / 2);
+      for (let i = 0; i < bytes.length; i++) {{
+        bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+      }}
+      return bytes;
+    }}
+    const bytes = hexToBytes(hex);
+    const blob = new Blob([bytes], {{ type: "{content_type}" }});
+
+    const resp = await fetch("{signed_url}", {{
+      method: 'PUT',
+      headers: {{
+        'Content-Type': '{content_type}'
+      }},
+      body: blob
+    }});
+
+    if (!resp.ok) {{
+      const text = await resp.text();
+      document.body.innerHTML = `<pre>Falha no upload: ${{resp.status}}\n${{text}}</pre>`;
+      return;
+    }}
+
+    document.body.innerHTML = `<div style="font-family: sans-serif;">✅ Upload concluído no GCS: gs://{bucket_name}/{object_name}</div>`;
+    window.parent.postMessage({{ type: 'gcs-upload-done', path: 'gs://{bucket_name}/{object_name}' }}, '*');
+  }} catch (e) {{
+    document.body.innerHTML = `<pre>Erro: ${{e?.message || e}}</pre>`;
+  }}
+}})();
+</script>
+            """,
+            height=120
+        )
+
+        # Registrar no session state caminho no GCS (será confirmado pelo postMessage)
+        st.session_state['last_gcs_object'] = f"gs://{bucket_name}/{object_name}"
+
+    # Botão para processar arquivo que já está no GCS
+    if st.session_state.get('last_gcs_object'):
+        st.success(f"Arquivo no GCS: {st.session_state['last_gcs_object']}")
+        if st.button("🔄 Ler e processar arquivo do GCS"):
+            process_gcs_uploaded_file(st.session_state['last_gcs_object'])
+
+def process_gcs_uploaded_file(gcs_path: str):
+    """Lê arquivo do GCS e integra ao fluxo de arquivos carregados."""
+    try:
+        content = storage_manager.download_file(gcs_path)
+        if content is None:
+            st.error("Não foi possível baixar arquivo do GCS.")
+            return
+
+        name = Path(gcs_path).name
+
+        # Detecta tipo pelo sufixo
+        if name.lower().endswith('.csv'):
+            df = pd.read_csv(io.BytesIO(content))
+        else:
+            df = pd.read_excel(io.BytesIO(content))
+
+        if 'uploaded_files' not in st.session_state:
+            st.session_state['uploaded_files'] = {}
+
+        file_key = f"gcs_{name}_{int(datetime.now().timestamp())}"
+        st.session_state['uploaded_files'][file_key] = {
+            'name': name,
+            'data': df,
+            'file_path': gcs_path,
+            'file_size_mb': round(len(content) / (1024 * 1024), 2),
+            'type': 'data',
+            'uploaded_at': datetime.now(),
+            'rows': len(df),
+            'columns': len(df.columns),
+            'index_column': None
+        }
+
+        st.success(f"✅ Arquivo processado do GCS: {name}")
+    except Exception as e:
+        st.error(f"Erro ao processar arquivo do GCS: {e}")
 
 def process_main_file(file):
     """Processa arquivo principal"""
