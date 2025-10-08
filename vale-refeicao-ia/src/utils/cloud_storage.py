@@ -31,10 +31,22 @@ class CloudStorageManager:
         self.bucket_name = os.getenv('GCS_BUCKET_NAME', 'crmia-uploads')
         self.project_id = os.getenv('GCP_PROJECT_ID', 'awesome-carver-463213-r0')
         self.use_gcs = IS_CLOUD_RUN and GCS_AVAILABLE
+        self.service_account_key_json = os.getenv('GCS_SERVICE_ACCOUNT_KEY_JSON')
         
         if self.use_gcs:
             try:
-                self.client = storage.Client(project=self.project_id)
+                # Se houver chave JSON, usar credenciais explícitas
+                if self.service_account_key_json:
+                    import json
+                    from google.oauth2 import service_account
+                    
+                    key_data = json.loads(self.service_account_key_json)
+                    credentials = service_account.Credentials.from_service_account_info(key_data)
+                    self.client = storage.Client(project=self.project_id, credentials=credentials)
+                else:
+                    # Usar credenciais padrão (ADC)
+                    self.client = storage.Client(project=self.project_id)
+                
                 self.bucket = self._get_or_create_bucket()
             except Exception as e:
                 st.warning(f"Não foi possível conectar ao Cloud Storage: {e}")
