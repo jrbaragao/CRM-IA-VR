@@ -175,41 +175,28 @@ def process_uploaded_files(files):
                 
                 add_log("✅", f"Tamanho: **{file_size_mb:.2f} MB** ({file_size_bytes:,} bytes)")
                 
-                # Verificar limite
-                if file_size_mb > 30:
-                    add_log("⚠️", f"**ALERTA**: Arquivo > 30MB! Cloud Run pode rejeitar.", "warning")
-                    add_log("💡", "Solução: Use a versão local ou divida o arquivo", "warning")
+                # Verificar limite baseado no ambiente
+                max_size = storage_manager.max_file_size_mb
+                if file_size_mb > max_size:
+                    add_log("⚠️", f"**ALERTA**: Arquivo ({file_size_mb:.2f}MB) excede o limite de {max_size}MB para {storage_manager.environment}!", "warning")
+                    add_log("💡", "Solução: Use arquivos menores, divida o arquivo, ou rode localmente para limite maior", "warning")
                     
-                # Tentar salvar arquivo
-                add_log("💾", f"Salvando arquivo no storage...")
+                # Salvar arquivo localmente
+                add_log("💾", f"Salvando arquivo localmente...")
                 try:
-                    file_content = file.read()
-                    file.seek(0)  # Resetar para leitura do pandas
-                    
-                    add_log("☁️", f"Fazendo upload para Cloud Storage...")
-                    
-                    saved_path = storage_manager.upload_file(
-                        file_content,
-                        file.name,
-                        folder="uploads"
-                    )
+                    file.seek(0)  # Resetar ponteiro do arquivo
+                    saved_path = storage_manager.save_uploaded_file(file, subfolder="")
                     
                     if not saved_path:
                         add_log("❌", f"Erro ao salvar arquivo '{file.name}'", "error")
                         continue
-                        
+                    
+                    file.seek(0)  # Resetar novamente para leitura posterior
                     add_log("✅", f"Arquivo salvo: {saved_path}", "success")
                     
                 except Exception as e:
                     add_log("❌", f"**ERRO ao salvar**: {str(e)}", "error")
                     add_log("🔍", f"Tipo de erro: {type(e).__name__}", "error")
-                    
-                    if "413" in str(e) or "Payload" in str(e) or "too large" in str(e).lower():
-                        add_log("🚨", f"**ERRO 413 (Payload Too Large)**", "error")
-                        add_log("📊", f"Arquivo {file.name}: {file_size_mb:.2f}MB", "error")
-                        add_log("⚠️", f"Limite do Cloud Run: ~32MB via HTTP", "error")
-                        add_log("💡", f"**SOLUÇÃO**: Use a versão local:", "warning")
-                        add_log("💻", "```bash\ngit clone https://github.com/jrbaragao/CRM-IA-VR.git\ncd CRM-IA-VR/vale-refeicao-ia\nstreamlit run app.py\n```", "warning")
                     continue
                 
                 # Ler arquivo para obter metadados
