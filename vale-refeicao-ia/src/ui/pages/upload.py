@@ -6,10 +6,6 @@ import streamlit as st
 import pandas as pd
 from pathlib import Path
 from datetime import datetime
-import os
-import io
-import json
-import streamlit.components.v1 as components
 
 from ..components import (
     render_upload_widget,
@@ -24,38 +20,20 @@ def render():
     """Renderiza página de upload"""
     st.header("📤 Upload de Dados")
     
-    # Mostrar informações sobre storage
+    # Mostrar informações sobre storage (simplificado)
     storage_info = storage_manager.get_storage_info()
-    if storage_info['using_gcs']:
-        col1, col2 = st.columns([3, 1])
+    
+    # Mostrar aviso sobre limite de tamanho
+    limit_message = storage_manager.get_file_size_limit_message()
+    
+    if storage_info['is_cloud_run']:
+        st.warning(f"""
+        {limit_message}
         
-        with col1:
-            st.warning(f"""
-            ☁️ **Cloud Storage Configurado** - Bucket: `{storage_info['bucket_name']}`
-            
-            ✅ **Upload Direto ao GCS habilitado**
-            """)
-        
-        # col2 intencionalmente sem conteúdo: botão "Arquivos Grandes?" removido
-        
-        # Debug - vamos descobrir de onde vem o limite
-        if st.button("🔍 Debug Upload Limits", help="Investigar de onde vem o limite real"):
-            from ...utils.debug_upload import debug_upload_limits, create_test_file
-            
-            debug_upload_limits()
-            create_test_file()
-
-        # Garantir CORS do bucket para upload direto via navegador (executa uma vez)
-        if not st.session_state.get('gcs_cors_configured'):
-            if storage_manager.configure_bucket_cors():
-                st.session_state['gcs_cors_configured'] = True
-                st.info("CORS do bucket verificado/atualizado para upload direto.")
-
-        st.divider()
-        render_gcs_direct_upload_section(storage_info['bucket_name'])
-        
+        💡 **Dica**: Para trabalhos acadêmicos, use arquivos CSV menores ou teste localmente para arquivos maiores.
+        """)
     else:
-        st.info("💾 **Modo Local** - Limite de upload: **200MB** por arquivo")
+        st.info(limit_message)
     
     # Mostrar o fluxo completo com destaque visual
     st.markdown("""
@@ -323,245 +301,6 @@ def process_uploaded_files(files):
         
     except Exception as e:
         st.error(f"❌ Erro ao processar arquivos: {str(e)}")
-
-def render_gcs_direct_upload_section(bucket_name: str):
-    """Seção para upload direto ao GCS via Signed URL (PUT) sem enviar arquivo ao servidor."""
-    st.subheader("☁️ Upload Direto ao Google Cloud Storage (para arquivos grandes)")
-
-    # Gerar um nome de objeto único na sessão
-    if 'gcs_pending_object' not in st.session_state:
-        unique_id = f"{int(datetime.now().timestamp())}-{os.urandom(4).hex()}"
-        st.session_state['gcs_pending_object'] = f"uploads/upload-{unique_id}"
-
-    object_name = st.session_state['gcs_pending_object']
-
-    # Tenta gerar Signed URL (requer chave privada ou IAM configurado)
-    signed_url = storage_manager.generate_signed_upload_url(
-        object_name,
-        expiration_minutes=30,
-        content_type=None  # Permite qualquer content-type
-    )
-
-    if not signed_url:
-        st.error("""
-        ❌ **Upload direto não disponível neste ambiente**
-        
-        **Motivo:** Cloud Run sem chave privada da conta de serviço.
-        
-        **Soluções:**
-        1. 💻 **Use a versão local** para arquivos >30MB (recomendado)
-        2. 📂 **Divida o arquivo** em partes menores (<30MB cada)
-        3. 🔧 **Configure Service Account Key** como secret no Cloud Run
-        
-        Para arquivos <30MB, use o upload tradicional acima.
-        """)
-        return
-
-    gs_path = f"gs://{bucket_name}/{object_name}"
-    st.success(f"✅ Upload direto habilitado! Destino: `{gs_path}`")
-    
-    # Debug: mostrar informações da URL gerada
-    with st.expander("🔍 Debug - Informações da Signed URL", expanded=False):
-        st.code(f"""
-URL gerada: {signed_url[:100]}{'...' if len(signed_url) > 100 else ''}
-Tamanho da URL: {len(signed_url)} caracteres
-Bucket: {bucket_name}
-Object: {object_name}
-Método: PUT
-        """.strip())
-        
-        # Verificar se URL parece válida
-        if signed_url.startswith('https://storage.googleapis.com/'):
-            st.success("✅ URL parece válida (formato correto)")
-        else:
-            st.warning(f"⚠️ URL não tem formato esperado. Começa com: {signed_url[:50]}")
-
-    html = """
-<div style="font-family: sans-serif;">
-  <label for="fileInput" style="display:block;margin-bottom:8px;font-weight:bold;">
-    Selecione o arquivo (será enviado direto ao GCS):
-  </label>
-  <input id="fileInput" type="file" accept=".csv,.xlsx,.xls" style="margin-bottom:8px;" />
-  <button id="btnUpload" style="padding:8px 16px;background:#667eea;color:white;border:none;border-radius:4px;cursor:pointer;">
-    🚀 Enviar ao GCS
-  </button>
-  <div id="debug" style="margin-top:8px;padding:4px;font-size:0.8em;color:#666;"></div>
-  <div id="status" style="margin-top:12px;padding:8px;border-radius:4px;"></div>
-</div>
-<script>
-  const btn = document.getElementById('btnUpload');
-  const input = document.getElementById('fileInput');
-  const statusEl = document.getElementById('status');
-  const debugEl = document.getElementById('debug');
-  const uploadUrl = '__UPLOAD_URL__';
-  const gsPath = '__GS_PATH__';
-  
-  // Debug: mostrar URL
-  debugEl.innerHTML = `<b>Debug:</b> URL gerada (${uploadUrl.length} chars)<br>Método: PUT | Destino: ${gsPath}`;
-  
-  btn.onclick = async () => {
-    let resp;
-    try {
-      if (!input.files || input.files.length === 0) {
-        statusEl.style.background = '#fff3cd';
-        statusEl.textContent = '⚠️ Selecione um arquivo primeiro';
-        return;
-      }
-      
-      const file = input.files[0];
-      const sizeMB = (file.size / (1024 * 1024)).toFixed(2);
-      const contentType = file.type || 'application/octet-stream';
-      
-      statusEl.style.background = '#d1ecf1';
-      statusEl.textContent = `📤 Enviando ${file.name} (${sizeMB} MB)...`;
-      debugEl.innerHTML = `<b>Debug:</b> Enviando via fetch PUT...<br>Content-Type: ${contentType}<br>Size: ${file.size} bytes`;
-      
-      console.log('=== INÍCIO DO UPLOAD ===');
-      console.log('Upload URL:', uploadUrl);
-      console.log('File:', file.name, file.size, contentType);
-      
-      resp = await fetch(uploadUrl, {
-        method: 'PUT',
-        body: file,
-        headers: {
-          'Content-Type': contentType
-        },
-        mode: 'cors'
-      });
-      
-      console.log('Response status:', resp.status);
-      console.log('Response statusText:', resp.statusText);
-      console.log('Response ok:', resp.ok);
-      
-      // GCS retorna 200 para sucesso em PUT de Signed URL
-      if (resp.status === 200 || resp.status === 201) {
-        statusEl.style.background = '#d4edda';
-        statusEl.innerHTML = `✅ <b>Upload concluído com sucesso!</b><br><small>Arquivo enviado para: ${gsPath}</small><br><br>👉 Agora clique no botão <b>"Verificar e processar arquivo do GCS"</b> abaixo`;
-        debugEl.innerHTML = `<b>Debug:</b> Sucesso! HTTP ${resp.status}`;
-        console.log('=== UPLOAD CONCLUÍDO COM SUCESSO ===');
-        return;
-      }
-      
-      // Status diferente de 200/201
-      let text = '';
-      try {
-        text = await resp.text();
-      } catch (e) {
-        text = 'Não foi possível ler resposta';
-      }
-      
-      statusEl.style.background = '#f8d7da';
-      statusEl.innerHTML = `❌ Falha no upload: HTTP ${resp.status} ${resp.statusText}<br><pre style="margin-top:8px;font-size:0.85em;max-height:200px;overflow:auto;">${text}</pre>`;
-      debugEl.innerHTML = `<b>Debug:</b> HTTP ${resp.status} - ${resp.statusText}`;
-      console.error('Upload failed with status:', resp.status);
-      
-    } catch (e) {
-      // Erro de rede ou CORS
-      statusEl.style.background = '#f8d7da';
-      statusEl.innerHTML = `❌ Erro de conexão: ${e.message || e}<br><small>Tipo: ${e.name}</small><br><br>⚠️ <b>Possíveis causas:</b><br>- CORS não configurado no bucket<br>- URL expirada<br>- Problema de rede`;
-      debugEl.innerHTML = `<b>Debug:</b> Exception - ${e.name}: ${e.message}<br>Status do fetch: ${resp ? resp.status : 'não iniciado'}`;
-      console.error('=== ERRO NO UPLOAD ===');
-      console.error('Error name:', e.name);
-      console.error('Error message:', e.message);
-      console.error('Error stack:', e.stack);
-    }
-  };
-</script>
-    """
-    html = html.replace('__UPLOAD_URL__', signed_url).replace('__GS_PATH__', gs_path)
-    components.html(html, height=220)
-
-    st.divider()
-    
-    # Mostrar status do arquivo no GCS
-    st.info("""
-    📝 **Instruções:**
-    1. Selecione o arquivo acima
-    2. Clique "🚀 Enviar ao GCS"
-    3. Aguarde a mensagem de sucesso
-    4. Clique no botão abaixo para processar
-    """)
-    
-    col1, col2 = st.columns([1, 1])
-    with col1:
-        if st.button("🔄 Verificar e processar arquivo do GCS", type="primary", use_container_width=True):
-            process_gcs_uploaded_file(gs_path)
-    
-    with col2:
-        if st.button("🔄 Gerar nova URL", help="Gera um novo caminho de destino", use_container_width=True):
-            if 'gcs_pending_object' in st.session_state:
-                del st.session_state['gcs_pending_object']
-            st.rerun()
-
-def process_gcs_uploaded_file(gcs_path: str):
-    """Lê arquivo do GCS e integra ao fluxo de arquivos carregados."""
-    try:
-        with st.spinner(f"📥 Baixando arquivo do GCS..."):
-            content = storage_manager.download_file(gcs_path)
-            if content is None:
-                st.error("❌ Não foi possível baixar arquivo do GCS.")
-                return
-
-        name = Path(gcs_path).name
-        size_mb = round(len(content) / (1024 * 1024), 2)
-        
-        st.info(f"📊 Processando arquivo: {name} ({size_mb} MB)")
-
-        # Detecta tipo pelo sufixo e lê o arquivo
-        try:
-            if name.lower().endswith('.csv'):
-                df = pd.read_csv(io.BytesIO(content), quotechar='"', skipinitialspace=True)
-                df.columns = df.columns.str.strip('"').str.strip()
-            elif name.lower().endswith(('.xlsx', '.xls')):
-                df = pd.read_excel(io.BytesIO(content))
-            else:
-                st.error(f"❌ Formato de arquivo não suportado: {name}")
-                return
-        except Exception as e:
-            st.error(f"❌ Erro ao ler arquivo: {e}")
-            return
-
-        if df.empty:
-            st.warning("⚠️ Arquivo está vazio")
-            return
-
-        if 'uploaded_files' not in st.session_state:
-            st.session_state['uploaded_files'] = {}
-
-        file_key = f"gcs_{name}_{int(datetime.now().timestamp())}"
-        st.session_state['uploaded_files'][file_key] = {
-            'name': name,
-            'data': df,
-            'file_path': gcs_path,
-            'file_size_mb': size_mb,
-            'type': 'data',
-            'uploaded_at': datetime.now(),
-            'rows': len(df),
-            'columns': len(df.columns),
-            'index_column': None
-        }
-
-        st.success(f"""
-        ✅ **Arquivo processado com sucesso!**
-        
-        - 📁 Nome: {name}
-        - 📊 Tamanho: {size_mb} MB
-        - 📈 Linhas: {len(df):,}
-        - 📋 Colunas: {len(df.columns)}
-        - ☁️ Origem: GCS
-        """)
-        
-        # Limpar objeto pendente para permitir novo upload
-        if 'gcs_pending_object' in st.session_state:
-            del st.session_state['gcs_pending_object']
-        
-        st.info("💡 Agora vá para **'🔄 Preparação de Dados'** no menu lateral para processar o arquivo.")
-        
-    except Exception as e:
-        st.error(f"❌ Erro ao processar arquivo do GCS: {e}")
-        import traceback
-        with st.expander("🔍 Detalhes do erro"):
-            st.code(traceback.format_exc())
 
 def process_main_file(file):
     """Processa arquivo principal"""
